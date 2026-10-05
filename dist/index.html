@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="nb">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="En enkel, gratis PDF-brosjyreviser for Webflow og andre nettsider.">
+  <title>E-brosjyre — rom for å lese</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%23283d31'/%3E%3Cpath d='M10 10h9v21h-9zm11 0h9v21h-9z' fill='%23d3d5ab'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="demo.css">
+  <script type="module" src="ebrosjyre.js"></script>
+  <script type="module" src="demo.js"></script>
+</head>
+<body>
+  <header class="masthead"><a class="brand" href="./" aria-label="E-brosjyre hjem"><span class="book-mark" aria-hidden="true"></span>e-brosjyre<span class="badge">FRI Å BRUKE</span></a><a class="guide-link" href="#oppsett">Bruk på din nettside <span aria-hidden="true">↗</span></a></header>
+  <main>
+    <div class="document-heading"><div><p class="eyebrow">EN LITEN PAUSE. ET NYTT KAPITTEL.</p><h1 id="document-title">Smaken av sesongen<span>.</span></h1></div><button class="source-toggle" type="button" aria-expanded="false" aria-controls="source-panel">Bytt PDF <span aria-hidden="true">↗</span></button></div>
+    <form id="source-panel" class="source-panel" hidden><div class="source-choices" role="group" aria-label="Velg PDF"><button type="button" class="secondary" data-src="./demo.pdf" data-title="Smaken av sesongen" data-caption="EKSEMPELBROSJYRE <span class='dot'>·</span> SESONG 2026">Eksempelbrosjyre</button><button type="button" class="secondary" data-src="./lokal-katalog.pdf" data-title="Lokal katalog" data-caption="EKTE KATALOG <span class='dot'>·</span> 12 SIDER" hidden>Lokal katalog</button></div><label for="pdf-url">Lenke til PDF</label><div class="input-row"><input id="pdf-url" type="url" placeholder="https://din-nettside.no/brosjyre.pdf" required><button class="primary" type="submit">Åpne brosjyre</button></div><p>Bruk en offentlig lenke fra Webflow eller en annen filvert. PDF-en blir ikke lastet opp hit.</p></form>
+    <e-brosjyre src="./demo.pdf" title="Smaken av sesongen"></e-brosjyre>
+    <div class="reader-caption"><span id="caption">EKSEMPELBROSJYRE <span class="dot">·</span> SESONG 2026</span><span>Bla med piltastene <span aria-hidden="true">← →</span> <span class="dot">/</span> Dra eller sveip <span class="dot">/</span> Knip for å zoome</span></div>
+    <section class="setup" id="oppsett"><div class="setup-intro"><p class="eyebrow">DIN PDF. DIN NETTSIDE.</p><h2>Fra fil til<br><em>leseopplevelse.</em></h2><p>Legg inn PDF-lenken, kopier koden og gi brosjyren en plass på nettsiden din.</p><span class="small-note">Ingen konto. Ingen annonser. Ingen abonnement på viseren.</span></div>
+      <div class="setup-form"><ol><li><strong>Publiser viserfilene</strong><p>Last opp innholdet i <code>dist/</code> på en statisk filvert, og lim inn adressen til <code>ebrosjyre.js</code> under. Se <a href="README.html">oppsettsveiledningen</a>.</p></li><li><strong>Legg til PDF-lenken</strong><p>Last opp PDF-en i Webflow Assets eller hos en annen filvert, og kopier den offentlige lenken.</p></li><li><strong>Lim koden inn i Webflow</strong><p>Bruk et Code Embed-element og publiser siden.</p></li></ol>
+      <form id="embed-form"><label for="script-url">Adresse til ebrosjyre.js</label><input id="script-url" type="url" required placeholder="https://din-filvert.no/ebrosjyre.js"><label for="embed-pdf">Adresse til PDF</label><input id="embed-pdf" type="url" required placeholder="https://din-filvert.no/brosjyre.pdf"><label for="embed-spread">Visning av sider</label><select id="embed-spread"><option value="always" selected>To og to sider, også på mobil (standard)</option><option value="auto">To og to, men én side på smale skjermer</option><option value="single">Alltid én side om gangen</option></select><p class="field-note">Velg to og to når oppslagene er designet som ett bilde over to sider. Forsiden og siste side vises alltid alene.</p><button class="primary" type="submit">Lag innbyggingskode <span aria-hidden="true">↗</span></button></form>
+      <div id="embed-result" hidden><label for="embed-code">Klar for Code Embed i Webflow</label><textarea id="embed-code" readonly rows="9" spellcheck="false"></textarea><button id="copy" class="secondary" type="button">Kopier kode</button><p id="copy-status" role="status"></p></div>
+      <p class="hosting-note">PDF-verten må tillate CORS. Webflow kan kreve en betalt plan for egendefinert kode. Selve viseren er gratis.</p></div>
+    </section>
+  </main>
+  <footer class="site-footer"><span class="brand">e-brosjyre</span><span>Laget for innhold som fortjener litt mer plass.</span><a href="./demo.pdf" target="_blank" rel="noopener">Åpne eksempel-PDF ↗</a></footer>
+</body>
+</html>

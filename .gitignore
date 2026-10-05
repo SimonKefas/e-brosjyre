@@ -1,0 +1,7 @@
+node_modules/
+
+test-results/
+playwright-report/
+.DS_Store
+# Ekte kundekatalog til lokal testing (opphavsrettslig materiale, 4 MB) — hold utenfor repoet.
+public/lokal-katalog.pdf
