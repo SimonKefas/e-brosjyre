@@ -60,15 +60,59 @@ Utelater du `chrome`, eller skriver en ukjent verdi, brukes `full`. Du kan endre
 
 Med `none` er kontrollene fortsatt der for skjermlesere og tastatur, men skjult for øyet. Den som går med Tab inn i brosjyren, ser pilene og verktøylinjen dukke opp over boken mens de har fokus. Slik kan brosjyren også brukes av den som ikke kan dra eller sveipe. Høyden tilpasses uten verktøylinjen, så det blir ikke et tomt felt under boken.
 
+### Lenke til en bestemt side: `deep-link`
+
+Adressen i nettleseren følger siden leseren er på: blar de til side 8, blir adressen `…/brosjyre#side=8`. Deler de lenken, åpner mottakeren brosjyren på samme sted. Du kan også lenke dit selv, for eksempel `<a href="#side=12">Se prislisten</a>` på samme nettside, eller `https://din-nettside.no/katalog#side=12` i en e-post.
+
+- Adressen byttes ut på stedet (`history.replaceState`). Nettleserens historikk fylles ikke med ett steg per side, så tilbakeknappen tar leseren rett tilbake til forrige nettside.
+- Forsiden trenger ikke noe sidetall, og der fjernes `#side=` fra adressen.
+- Et sidetall som ikke finnes i PDF-en (`#side=99`, `#side=abc`), åpner forsiden.
+- Viseren rører aldri en `#`-adresse som tilhører nettsiden selv. Har leseren klikket på et anker som `#kontakt`, blir den stående, og bla-ingen endrer ikke adressen.
+- Har siden flere visere, er det bare den første som følger adressen. De andre lar den være.
+
+| Verdi | Virkning |
+| --- | --- |
+| `on` (standard) | Viseren leser `#side=` ved oppstart og holder adressen oppdatert mens leseren blar. |
+| `off` | Viseren lar adressen være helt i fred, og åpner alltid på forsiden. |
+
+Standarden er `on`: delbare lenker er det de fleste vil ha, og de virker uten at du gjør noe. Bruk `deep-link="off"` når nettsiden selv bruker `#`-adressen til noe annet, for eksempel faner eller en side som ruter med `#`. Med flere visere på samme side kan du slå av den første for å la en senere følge adressen.
+
 ### Høyde
 
 Viseren setter sin egen høyde ut fra bredden og det den viser: lav og bred for oppslag, høy for enkeltsider, aldri mer enn 88 % av skjermhøyden. Da flyter ikke oppslaget i et tomt felt på mobil. Setter du selv en høyde på elementet, for eksempel `style="height:80vh"`, brukes den i stedet. Da kan det bli tom plass over og under et oppslag på smale skjermer. Scriptet kan lastes én gang per side, også ved flere visere. Komponenten bruker Shadow DOM for å isolere stilene fra Webflow.
+
+### Hendelser
+
+Viseren sender tre hendelser fra `<e-brosjyre>`-elementet. Bruk dem for eksempel til å måle hvor langt folk faktisk leser.
+
+| Hendelse | Når | `detail` |
+| --- | --- | --- |
+| `brochure-ready` | Én gang når PDF-en er lastet og de første sidene vises. | `{ page, pages, total }` |
+| `brochure-page` | Hver gang leseren lander på et nytt oppslag, også det første. Sendes når bladet har landet, ikke underveis i en vending, og bare én gang for det samme oppslaget. Zoom og endret vindusstørrelse sender ingenting så lenge de samme sidene vises. | `{ page, pages, total }` |
+| `brochure-error` | Når PDF-en ikke kan åpnes. | `{ message }` |
+
+`page` er første side i oppslaget som vises, `pages` er sidene som faktisk vises (én eller to, for eksempel `[6, 7]`), og `total` er antall sider i PDF-en. `message` er feilmeldingen leseren ser.
+
+```html
+<script>
+  const brosjyre = document.querySelector('e-brosjyre');
+  brosjyre.addEventListener('brochure-ready', e => console.log(`Lastet: ${e.detail.total} sider`));
+  brosjyre.addEventListener('brochure-page', e => {
+    const sist = Math.max(...e.detail.pages);
+    console.log(`Leser side ${e.detail.pages.join('–')} av ${e.detail.total}`);
+    // For eksempel: gtag('event', 'brosjyre_side', { side: sist, av: e.detail.total });
+  });
+  brosjyre.addEventListener('brochure-error', e => console.warn(e.detail.message));
+</script>
+```
+
+Legg scriptet etter `<e-brosjyre>` i samme Code Embed, eller i sidens egendefinerte kode før `</body>`. Hendelsene bobler ikke ut av en iframe; bruk direkte innbygging hvis du vil lytte på dem.
 
 Demoens **Bruk på din nettside** lager en kopierbar kode fra dine URL-er. Lokale adresser som `localhost` fungerer bare på din maskin og skal erstattes med offentlige HTTPS-adresser før publisering.
 
 ### Alternativ: iframe
 
-Hvis du foretrekker en iframe, bruk `viewer.html` fra publiseringspakken på din egen filvert. jsDelivr leverer HTML-filer som ren tekst, så iframe-varianten virker ikke derfra. `pdf`-parameteren (alias `src`) må URL-kodes (i JavaScript: `encodeURIComponent(pdfURL)`). `spread` og `chrome` virker som attributtene over. En iframe kan ikke endre sin egen høyde, så gi den en høyde som følger bredden. `aspect-ratio:6/5` passer omtrent for stående A4-oppslag. Eksempel:
+Hvis du foretrekker en iframe, bruk `viewer.html` fra publiseringspakken på din egen filvert. jsDelivr leverer HTML-filer som ren tekst, så iframe-varianten virker ikke derfra. `pdf`-parameteren (alias `src`) må URL-kodes (i JavaScript: `encodeURIComponent(pdfURL)`). `spread`, `chrome` og `deep-link` virker som attributtene over. Legg `#side=7` til slutt i adressen for å åpne på en bestemt side. Inne i en iframe følger viseren sin egen adresse, ikke nettsidens: adressen leseren deler, får ikke med seg sidetallet. Vil du ha delbare lenker til sider, bruk direkte innbygging. En iframe kan ikke endre sin egen høyde, så gi den en høyde som følger bredden. `aspect-ratio:6/5` passer omtrent for stående A4-oppslag. Eksempel:
 
 ```html
 <iframe
@@ -106,6 +150,7 @@ Hvis viseren viser en feil, kontroller offentlig tilgang, CORS, at lenken return
 - Fullskjerm på nettlesere og innbygginger som støtter/tillater det. Knappen skjules når funksjonen ikke er tilgjengelig.
 - Tekstlag: PDF-ens egen tekst ligger usynlig over hver side, nøyaktig der ordene er tegnet. Med mus eller penn markerer du tekst ved å dra over den og kopierer som vanlig; et drag som starter utenfor teksten blar. På berøringsskjerm blar et sveip også over tekst, og et langt trykk markerer. Skjermlesere leser sideteksten i stedet for et bilde av siden. Mens et blad vendes, er tekstlaget borte, og det kommer tilbake når bladet har landet.
 - Lenker i PDF-en er klikkbare. Nettlenker (`http`, `https`) åpnes i ny fane med `rel="noopener noreferrer"`, `mailto`-lenker åpner e-postprogrammet, og lenker til en side i samme PDF blar dit. Andre lenketyper, som `javascript:` og `file:`, blir ikke klikkbare.
+- Delbare lenker til en side (`#side=7`) som følger leseren uten å fylle historikken, og hendelsen `brochure-page` ved hvert sidebytte.
 - Tre rammevarianter med `chrome`: full mørk boks, gjennomsiktig med knapper, eller bare boken.
 - Flere uavhengige visere på samme side; `src` kan endres dynamisk.
 - Lastestatus, feilbeskjeder, tastaturfokus og redusert bevegelse.

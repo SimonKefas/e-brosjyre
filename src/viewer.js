@@ -58,6 +58,8 @@ const CHROMES = ['full', 'minimal', 'none'];
 const A4 = { width: 595, height: 842 };
 // Link targets a page may open. Anything else (javascript:, file:, data: …) is left unlinked.
 const SCHEMES = ['http:', 'https:', 'mailto:'];
+// A link to a page of the brochure, in the host page's URL fragment: #side=7. Any other fragment belongs to the host page.
+const PAGE_LINK = /^#side=(.*)$/;
 
 class EBrosjyre extends HTMLElement {
   static observedAttributes = ['src', 'title', 'spread', 'chrome'];
@@ -127,6 +129,15 @@ class EBrosjyre extends HTMLElement {
       const actions = { ArrowLeft: () => this.navigate(-1), ArrowRight: () => this.navigate(1), Home: () => this.goTo(1), End: () => this.goTo(this.pdf?.numPages), '+': () => this.setZoom(this.zoom + .25), '-': () => this.setZoom(this.zoom - .25), '0': () => this.setZoom(1) };
       if (actions[e.key]) { e.preventDefault(); actions[e.key](); }
     });
+    // A link to #side=N clicked on the host page, or the fragment edited by hand, turns there.
+    // One that names no page of the document is cleared, even when the book need not move.
+    on(window, 'hashchange', () => {
+      const page = this.pdf && this.linked && this.linkedPage();
+      if (!page) return;
+      this.goTo(page);
+      this.writeLink(this.visiblePages());
+    });
+    this.fresh = true; // The first document after connecting opens at the page the URL asks for.
     // Pointers on the book: one finger or the mouse turns pages (pans when zoomed in), two fingers pinch, a double tap zooms.
     const scroller = this.$('.scroller');
     const points = new Map(); // Pointer id → latest client position, for every pointer held down on the book.
@@ -221,6 +232,27 @@ class EBrosjyre extends HTMLElement {
   get chrome() {
     const value = this.getAttribute('chrome')?.trim().toLowerCase();
     return CHROMES.includes(value) ? value : 'full';
+  }
+  // Whether the viewer may follow the URL (the `deep-link` attribute): on unless set to "off", for a host page that owns its URL.
+  get deepLink() { return this.getAttribute('deep-link')?.trim().toLowerCase() !== 'off'; }
+  // Only one viewer on a page follows the URL, the first that has not opted out, so several never fight over it.
+  get linked() { return this.deepLink && [...document.querySelectorAll('e-brosjyre')].find(el => el.deepLink) === this; }
+  // The page the URL asks for: null when the fragment is not a page link, page 1 when its number is not a page of this document.
+  linkedPage() {
+    const match = PAGE_LINK.exec(location.hash);
+    if (!match) return null;
+    const page = /^\d+$/.test(match[1]) ? Number(match[1]) : 0;
+    return page >= 1 && page <= this.pdf.numPages ? page : 1;
+  }
+  // Point the URL at the spread on show, replacing the history entry so turning pages never fills the back button. Page 1 needs no
+  // fragment; one that already names a page on show is left as it is, and a fragment of the host page's own is never touched.
+  writeLink(pages) {
+    if (!this.linked) return;
+    const match = PAGE_LINK.exec(location.hash);
+    if ((location.hash && !match) || (match && pages.includes(Number(match[1])))) return;
+    const url = new URL(location.href);
+    url.hash = this.page === 1 ? '' : `side=${this.page}`;
+    if (url.href !== location.href) history.replaceState(history.state, '', url);
   }
   // The book model: two pages side by side, one at a time with spread="single", and with spread="auto" one only when the stage
   // is truly narrow (a page would get under 230 px, roughly a phone).
@@ -319,6 +351,7 @@ class EBrosjyre extends HTMLElement {
     this.page = 1;
     this.zoom = 1;
     this.ready = false;
+    this.shown = null;
     this.reset();
     this.$('.open').removeAttribute('href');
     this.$('.reader').setAttribute('aria-label', this.getAttribute('title') || 'PDF-brosjyre');
@@ -329,6 +362,8 @@ class EBrosjyre extends HTMLElement {
       if (generation !== this.generation) return;
       const source = this.getAttribute('src');
       if (!source) { this.message('Din neste leseopplevelse', 'Legg til en PDF-lenke for å åpne brosjyren.'); return; }
+      const fresh = this.fresh;
+      this.fresh = false;
       const url = new URL(source, document.baseURI);
       if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('invalid-url');
       this.$('.open').href = url.href;
@@ -357,6 +392,7 @@ class EBrosjyre extends HTMLElement {
       this.typical = { width: Number(common.split('x')[0]), height: Number(common.split('x')[1]) };
       this.sizes = sizes;
       this.pdf = pdf;
+      if (fresh && this.linked) this.page = this.normalizePage(this.linkedPage() ?? 1);
       this.fit();
       await this.render();
     } catch (error) {
@@ -486,8 +522,8 @@ class EBrosjyre extends HTMLElement {
       this.$('.scroller').scrollTo(0, 0);
       this.$('.message').hidden = true;
       this.$('.reader').setAttribute('aria-busy', 'false');
-      this.ready = true;
-      this.dispatchEvent(new CustomEvent('brochure-ready', { detail: { pages: this.pdf.numPages, page: this.page } }));
+      if (!this.ready) { this.ready = true; this.dispatchEvent(new CustomEvent('brochure-ready', { detail: this.position() })); }
+      this.landed();
       for (const number of neighbours) this.paint(number).catch(() => {});
       return true;
     } catch (error) {
@@ -495,6 +531,16 @@ class EBrosjyre extends HTMLElement {
       this.$('.reader').setAttribute('aria-busy', 'false');
       this.message('Siden kunne ikke vises', 'Prøv å bla videre, eller åpne original PDF.');
     }
+  }
+  // Where the reader is: the spread's first page, the pages on show and the document's length.
+  position() { return { page: this.page, pages: this.visiblePages(), total: this.pdf.numPages }; }
+  // The book has come to rest on its pages: once per spread shown, the URL follows and the host page hears of it.
+  landed() {
+    const { pages } = this.position();
+    if (pages.join() === this.shown) return;
+    this.shown = pages.join();
+    this.writeLink(pages);
+    this.dispatchEvent(new CustomEvent('brochure-page', { detail: this.position() }));
   }
   // Lay the page's text and links over its painted canvas, once it shows. Each is built off-DOM and added in one go.
   async annotate(number, page, viewport, entry) {
@@ -532,7 +578,7 @@ class EBrosjyre extends HTMLElement {
       if (annotation.dest) {
         const number = await this.destinationPage(pdf, annotation.dest).catch(() => null);
         if (!number) return null;
-        a.href = `#side-${number}`;
+        a.href = `#side=${number}`;
         a.dataset.page = number;
         a.setAttribute('aria-label', `Gå til side ${number}`);
       } else {
