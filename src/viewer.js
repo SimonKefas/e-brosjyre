@@ -9,6 +9,7 @@ const icons = {
   minus: '<path d="M5 12h14"/>', plus: '<path d="M5 12h14M12 5v14"/>',
   full: '<path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/>',
   open: '<path d="M14 3h7v7m0-7L10 14M10 3H3v18h18v-7"/>',
+  toc: '<path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>', close: '<path d="m6 6 12 12M18 6 6 18"/>',
 };
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${icons[name]}</svg>`;
 const button = (name, label, extra = '') => `<button type="button" class="${name}" aria-label="${label}" title="${label}" ${extra}>${icon(name)}</button>`;
@@ -73,9 +74,10 @@ class EBrosjyre extends HTMLElement {
           <canvas class="curl" aria-hidden="true"></canvas>
           <div class="message" role="status" aria-live="polite"><span class="spinner" hidden></span><strong></strong><p></p></div>
           ${button('prev', 'Forrige side')}${button('next', 'Neste side')}
+          <nav class="panel" id="contents" aria-label="Innholdsoversikt" hidden><header><strong>Innhold</strong>${button('close', 'Lukk innholdsoversikten')}</header><div class="entries"></div></nav>
         </div>
         <footer class="toolbar">
-          <input class="progress" type="range" min="1" max="1" value="1" aria-label="Gå til side">
+          <div class="track">${button('toc', 'Innholdsoversikt', 'aria-expanded="false" aria-controls="contents" hidden')}<input class="progress" type="range" min="1" max="1" value="1" aria-label="Gå til side"></div>
           <div class="controls">
             <output class="pages" aria-live="polite" aria-atomic="true">—</output>
             <div class="zoom">${button('minus', 'Zoom ut')}<button type="button" class="fit" aria-label="Tilpass til vinduet" title="Tilpass til vinduet">100 %</button>${button('plus', 'Zoom inn')}</div>
@@ -117,6 +119,15 @@ class EBrosjyre extends HTMLElement {
     on(this.$('.fit'), 'click', () => this.setZoom(1));
     on(this.$('.progress'), 'input', e => this.goTo(Number(e.target.value), true));
     on(this.$('.full'), 'click', () => this.toggleFullscreen());
+    on(this.$('.toc'), 'click', () => this.toggleContents());
+    on(this.$('.panel .close'), 'click', () => this.toggleContents(false));
+    on(this.$('.panel'), 'click', e => {
+      const entry = e.target.closest('button[data-page]');
+      if (!entry) return;
+      this.toggleContents(false);
+      this.goTo(Number(entry.dataset.page));
+    });
+    on(this.$('.panel'), 'keydown', e => this.contentsKey(e));
     on(document, 'fullscreenchange', () => {
       const active = document.fullscreenElement === this;
       this.$('.full').setAttribute('aria-label', active ? 'Avslutt fullskjerm' : 'Fullskjerm');
@@ -125,7 +136,7 @@ class EBrosjyre extends HTMLElement {
     this.$('.full').hidden = !document.fullscreenEnabled || !this.requestFullscreen;
     this.$('.reader').dataset.chrome = this.chrome;
     on(this.$('.reader'), 'keydown', e => {
-      if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.target.closest('.panel') || e.ctrlKey || e.metaKey || e.altKey) return;
       const actions = { ArrowLeft: () => this.navigate(-1), ArrowRight: () => this.navigate(1), Home: () => this.goTo(1), End: () => this.goTo(this.pdf?.numPages), '+': () => this.setZoom(this.zoom + .25), '-': () => this.setZoom(this.zoom - .25), '0': () => this.setZoom(1) };
       if (actions[e.key]) { e.preventDefault(); actions[e.key](); }
     });
@@ -142,6 +153,7 @@ class EBrosjyre extends HTMLElement {
     const scroller = this.$('.scroller');
     const points = new Map(); // Pointer id → latest client position, for every pointer held down on the book.
     on(scroller, 'pointerdown', e => {
+      this.toggleContents(false); // A touch on the book outside the contents puts them away.
       // A mouse or pen pressed on the text selects it, as anywhere on the web; a finger swipes there too and selects with a long press.
       if (e.pointerType !== 'touch' && e.target.closest('.textLayer span')) return;
       points.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -208,6 +220,8 @@ class EBrosjyre extends HTMLElement {
     clearTimeout(this.resizeTimer);
     cancelAnimationFrame(this.fitting);
     this.generation++;
+    this.thumbs?.observer.disconnect();
+    this.thumbs = null;
     this.reset();
     this.loadingTask?.destroy().catch(() => {});
     this.pdf = null;
@@ -216,7 +230,7 @@ class EBrosjyre extends HTMLElement {
     if (oldValue === newValue || !this.isConnected) return;
     if (name === 'src') this.load();
     else if (name === 'spread') this.relayout();
-    else if (name === 'chrome') { this.$('.reader').dataset.chrome = this.chrome; this.relayout(); }
+    else if (name === 'chrome') { this.$('.reader').dataset.chrome = this.chrome; this.toggleContents(false); this.relayout(); }
     else this.$('.reader').setAttribute('aria-label', this.getAttribute('title') || 'PDF-brosjyre');
   }
   get motion() { return !matchMedia('(prefers-reduced-motion: reduce)').matches; }
@@ -352,6 +366,10 @@ class EBrosjyre extends HTMLElement {
     this.zoom = 1;
     this.ready = false;
     this.shown = null;
+    this.toggleContents(false);
+    this.thumbs?.observer.disconnect();
+    this.thumbs = this.index = null;
+    this.$('.entries').replaceChildren();
     this.reset();
     this.$('.open').removeAttribute('href');
     this.$('.reader').setAttribute('aria-label', this.getAttribute('title') || 'PDF-brosjyre');
@@ -465,6 +483,8 @@ class EBrosjyre extends HTMLElement {
     this.$('.plus').disabled = !this.pdf || this.zoom >= 3;
     this.$('.fit').disabled = !this.pdf;
     this.$('.fit').textContent = `${Math.round(this.zoom * 100)} %`;
+    // No contents without a document, nor with chrome="none", which has no controls of its own to show.
+    this.$('.toc').hidden = !this.pdf || this.chrome === 'none';
     // At rest a vertical swipe still scrolls the page; zoomed in, every touch pans or pinches the book.
     this.$('.scroller').style.touchAction = this.zoom === 1 ? 'pan-y' : 'none';
     this.$('.reader').classList.toggle('zoomed', this.zoom > 1);
@@ -540,6 +560,7 @@ class EBrosjyre extends HTMLElement {
     if (pages.join() === this.shown) return;
     this.shown = pages.join();
     this.writeLink(pages);
+    this.markContents();
     this.dispatchEvent(new CustomEvent('brochure-page', { detail: this.position() }));
   }
   // Lay the page's text and links over its painted canvas, once it shows. Each is built off-DOM and added in one go.
@@ -966,6 +987,138 @@ class EBrosjyre extends HTMLElement {
     this.pinch = null;
     this.view = null;
     this.place();
+  }
+  // The contents: the PDF's own bookmarks where it has them, named chapters being the quickest way into a long document, and
+  // otherwise a small picture of every page. Built the first time they are opened, once per document.
+  async toggleContents(open = this.$('.panel').hidden) {
+    const panel = this.$('.panel'), toggle = this.$('.toc');
+    if (open === !panel.hidden || (open && toggle.hidden)) return;
+    if (!open) {
+      const inside = panel.contains(this.shadowRoot.activeElement);
+      panel.hidden = true;
+      toggle.setAttribute('aria-expanded', 'false');
+      if (inside) toggle.focus({ preventScroll: true });
+      return;
+    }
+    panel.hidden = false;
+    toggle.setAttribute('aria-expanded', 'true');
+    await (this.index ??= this.contents());
+    if (panel.hidden) return;
+    // Start at the entry for the page on show, in the middle of the list, without scrolling the page around the viewer.
+    const entries = this.$('.entries'), current = entries.querySelector('[aria-current]') ?? entries.querySelector('button');
+    if (!current) return;
+    entries.scrollTop = current.offsetTop - (entries.clientHeight - current.offsetHeight) / 2;
+    current.focus({ preventScroll: true });
+  }
+  async contents() {
+    const pdf = this.pdf;
+    const outline = await pdf.getOutline().catch(() => null);
+    const chapters = outline?.length ? await this.chapters(pdf, outline) : null;
+    if (pdf !== this.pdf) return;
+    this.$('.entries').replaceChildren(chapters ?? this.thumbnails());
+    this.markContents();
+  }
+  // A nested list of the bookmarks that lead to a page of this document; null when none does.
+  async chapters(pdf, items) {
+    const entries = await Promise.all(items.map(async item => {
+      const page = item.dest ? await this.destinationPage(pdf, item.dest).catch(() => null) : null;
+      const children = item.items?.length ? await this.chapters(pdf, item.items) : null;
+      if (!page && !children) return null;
+      const li = document.createElement('li'), title = item.title?.trim() || `Side ${page}`;
+      if (page) {
+        const entry = document.createElement('button');
+        entry.type = 'button';
+        entry.dataset.page = page;
+        entry.setAttribute('aria-label', `${title}, side ${page}`);
+        const name = document.createElement('span'), number = document.createElement('span');
+        name.textContent = title;
+        number.className = 'number';
+        number.textContent = page;
+        entry.append(name, number);
+        li.append(entry);
+      } else {
+        const name = document.createElement('span');
+        name.className = 'group';
+        name.textContent = title;
+        li.append(name);
+      }
+      if (children) li.append(children);
+      return li;
+    }));
+    const kept = entries.filter(Boolean);
+    if (!kept.length) return null;
+    const list = document.createElement('ol');
+    list.append(...kept);
+    return list;
+  }
+  // A grid of every page, each a blank sheet of its own shape until it nears view.
+  thumbnails() {
+    const list = document.createElement('ol');
+    list.className = 'grid';
+    const thumbs = this.thumbs = { pending: new Set(), drawing: false };
+    thumbs.observer = new IntersectionObserver(seen => {
+      for (const { target, isIntersecting } of seen) thumbs.pending[isIntersecting ? 'add' : 'delete'](target);
+      this.drawThumbs(thumbs);
+    }, { root: this.$('.entries'), rootMargin: '300px 0px' });
+    this.sizes.forEach(({ width, height }, i) => {
+      const li = document.createElement('li'), entry = document.createElement('button'), sheet = document.createElement('span'), number = document.createElement('span');
+      entry.type = 'button';
+      entry.dataset.page = i + 1;
+      entry.setAttribute('aria-label', `Side ${i + 1}`);
+      sheet.className = 'thumb';
+      sheet.style.aspectRatio = `${width} / ${height}`;
+      number.className = 'number';
+      number.textContent = i + 1;
+      entry.append(sheet, number);
+      li.append(entry);
+      list.append(li);
+      thumbs.observer.observe(entry);
+    });
+    return list;
+  }
+  // Pages near view are painted small (96 px wide) and one at a time, so even a long document never holds the viewer up.
+  async drawThumbs(thumbs) {
+    if (thumbs.drawing) return;
+    thumbs.drawing = true;
+    const pdf = this.pdf;
+    while (thumbs.pending.size && thumbs === this.thumbs) {
+      const [entry] = thumbs.pending;
+      thumbs.pending.delete(entry);
+      thumbs.observer.unobserve(entry);
+      const number = Number(entry.dataset.page);
+      try {
+        const page = await pdf.getPage(number);
+        const viewport = page.getViewport({ scale: 96 * Math.min(window.devicePixelRatio || 1, 2) / this.sizes[number - 1].width });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        if (thumbs === this.thumbs) entry.querySelector('.thumb').append(canvas);
+      } catch {}
+    }
+    thumbs.drawing = false;
+  }
+  // Mark the entries for the pages on show: every page of the spread, or the last chapter that starts at or before it.
+  markContents() {
+    const entries = [...this.$('.entries').querySelectorAll('button[data-page]')];
+    const pages = this.visiblePages(), grid = !!this.thumbs;
+    const chapter = grid ? null : entries.filter(entry => Number(entry.dataset.page) <= this.page).at(-1);
+    for (const entry of entries) {
+      if (grid ? pages.includes(Number(entry.dataset.page)) : entry === chapter) entry.setAttribute('aria-current', 'page');
+      else entry.removeAttribute('aria-current');
+    }
+  }
+  // The arrow keys move through the entries (up and down by a row of the grid), Home and End to either end, Escape closes.
+  contentsKey(e) {
+    if (e.key === 'Escape') { e.preventDefault(); this.toggleContents(false); return; }
+    const entries = [...this.$('.entries').querySelectorAll('button[data-page]')];
+    const index = entries.indexOf(this.shadowRoot.activeElement);
+    const row = entries.filter(entry => entry.offsetTop === entries[0]?.offsetTop).length;
+    const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: row, ArrowUp: -row }[e.key];
+    const to = e.key === 'Home' ? 0 : e.key === 'End' ? entries.length - 1 : step && index >= 0 ? clamp(index + step, 0, entries.length - 1) : null;
+    if (to === null) return;
+    e.preventDefault();
+    entries[to].focus();
   }
   async toggleFullscreen() {
     try {
