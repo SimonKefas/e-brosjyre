@@ -230,7 +230,7 @@ for (const path of ['/viewer.html?src=/lenker.pdf', '/?lenker']) {
     const [web, mail, internal] = await anchors(page);
     expect(web).toMatchObject({ href: 'https://example.com/brosjyre?kilde=pdf', target: '_blank', rel: 'noopener noreferrer', page: null, name: 'https://example.com/brosjyre?kilde=pdf (åpnes i ny fane)' });
     expect(mail).toMatchObject({ href: 'mailto:post@example.com', target: null, rel: 'noopener noreferrer', name: 'E-post til post@example.com' });
-    expect(internal).toMatchObject({ href: '#side-4', target: null, page: '4', name: 'Gå til side 4' });
+    expect(internal).toMatchObject({ href: '#side=4', target: null, page: '4', name: 'Gå til side 4' });
     expectAt(web.at, LINKS.web); expectAt(mail.at, LINKS.mail); expectAt(internal.at, LINKS.internal);
     // Nothing for the javascript: and file: links.
     expect(await reader(page).evaluate(el => el.shadowRoot.querySelectorAll('.links a[href^="javascript"], .links a[href^="file"]').length)).toBe(0);
@@ -253,8 +253,9 @@ for (const path of ['/viewer.html?src=/lenker.pdf', '/?lenker']) {
     expect(await label(page)).toBe('2–3 / 5');
     expect(opened).toBe(0);
     await reader(page).evaluate(el => el.goTo(1, true)); await ready(page);
-    // The link to page 4 turns the book there; the URL stays as it was.
-    const url = page.url();
+    // The link to page 4 turns the book there; the URL then names the page, in place of the history entry it had.
+    const url = page.url(), history = await page.evaluate(() => history.length);
+    expect(url).not.toContain('#');
     await page.mouse.click(...internal.center);
     // Mid-turn whatever text and links are left in the slots stand aside (page 1 itself is on the leaf).
     const mid = await turning(page);
@@ -262,7 +263,8 @@ for (const path of ['/viewer.html?src=/lenker.pdf', '/?lenker']) {
     expect(mid.visibility.filter(v => v !== 'hidden')).toEqual([]);
     await ready(page);
     expect(await label(page)).toBe('4–5 / 5');
-    expect(page.url()).toBe(url);
+    expect(page.url()).toBe(`${url}#side=4`);
+    expect(await page.evaluate(() => history.length)).toBe(history);
     expect(opened).toBe(0);
   });
 }
