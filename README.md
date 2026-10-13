@@ -24,6 +24,7 @@ npm run dev
   src="https://DIN-PDFVERT.no/brosjyre.pdf"
   title="Vår brosjyre"
   spread="always"
+  chrome="full"
 ></e-brosjyre>
 ```
 
@@ -45,6 +46,20 @@ Utelater du `spread`, eller skriver en ukjent verdi, brukes `always`. Du kan end
 
 På telefon blir to stående sider smale: på en 390 px bred skjerm blir hver A4-side omtrent 180 × 255 px, og liten tekst må leses med zoom (knip eller dobbelttrykk) eller i fullskjerm med telefonen på tvers. Velg `auto` hvis teksten er viktigere enn helheten i oppslaget.
 
+### Rammen rundt boken: `chrome`
+
+`chrome` bestemmer hvor mye av viserens egen ramme som vises. Med `minimal` og `none` ligger brosjyren rett på nettsidens bakgrunn, som et designelement.
+
+| Verdi | Visning | Når du bør velge den |
+| --- | --- | --- |
+| `full` (standard) | Mørk boks med verktøylinje (sidetall, sidelinje, zoom, original-PDF og fullskjerm) og pilknapper. | Når brosjyren skal ha en tydelig leserflate. |
+| `minimal` | Gjennomsiktig bakgrunn. Verktøylinjen og pilene finnes fortsatt, men uten egne flater, og får nettsidens tekstfarge. All funksjonalitet beholdes. | Når brosjyren skal gli inn i siden, men leseren fortsatt skal ha knapper. |
+| `none` | Bare boken. Ingen verktøylinje, piler, sidetall, zoomknapper eller fullskjermknapp. Leseren blar med dra, sveip og piltaster, og kan knipe eller dobbelttrykke for å zoome. | Når brosjyren er et rent designelement på siden. |
+
+Utelater du `chrome`, eller skriver en ukjent verdi, brukes `full`. Du kan endre attributtet med JavaScript mens siden er åpen. Med `minimal` og `none` arver knappene og meldingene tekstfargen fra nettsiden; sett `color` på elementet (for eksempel `style="color:#1d2b22"`) hvis den ikke passer. I fullskjerm får alle variantene den mørke bakgrunnen tilbake.
+
+Med `none` er kontrollene fortsatt der for skjermlesere og tastatur, men skjult for øyet. Den som går med Tab inn i brosjyren, ser pilene og verktøylinjen dukke opp over boken mens de har fokus. Slik kan brosjyren også brukes av den som ikke kan dra eller sveipe. Høyden tilpasses uten verktøylinjen, så det blir ikke et tomt felt under boken.
+
 ### Høyde
 
 Viseren setter sin egen høyde ut fra bredden og det den viser: lav og bred for oppslag, høy for enkeltsider, aldri mer enn 88 % av skjermhøyden. Da flyter ikke oppslaget i et tomt felt på mobil. Setter du selv en høyde på elementet, for eksempel `style="height:80vh"`, brukes den i stedet. Da kan det bli tom plass over og under et oppslag på smale skjermer. Scriptet kan lastes én gang per side, også ved flere visere. Komponenten bruker Shadow DOM for å isolere stilene fra Webflow.
@@ -53,7 +68,7 @@ Demoens **Bruk på din nettside** lager en kopierbar kode fra dine URL-er. Lokal
 
 ### Alternativ: iframe
 
-Hvis du foretrekker en iframe, bruk `viewer.html` fra publiseringspakken på din egen filvert. jsDelivr leverer HTML-filer som ren tekst, så iframe-varianten virker ikke derfra. `pdf`-parameteren (alias `src`) må URL-kodes (i JavaScript: `encodeURIComponent(pdfURL)`). `spread` virker som attributtet over. En iframe kan ikke endre sin egen høyde, så gi den en høyde som følger bredden. `aspect-ratio:6/5` passer omtrent for stående A4-oppslag. Eksempel:
+Hvis du foretrekker en iframe, bruk `viewer.html` fra publiseringspakken på din egen filvert. jsDelivr leverer HTML-filer som ren tekst, så iframe-varianten virker ikke derfra. `pdf`-parameteren (alias `src`) må URL-kodes (i JavaScript: `encodeURIComponent(pdfURL)`). `spread` og `chrome` virker som attributtene over. En iframe kan ikke endre sin egen høyde, så gi den en høyde som følger bredden. `aspect-ratio:6/5` passer omtrent for stående A4-oppslag. Eksempel:
 
 ```html
 <iframe
@@ -89,6 +104,7 @@ Hvis viseren viser en feil, kontroller offentlig tilgang, CORS, at lenken return
 - Zoom 100–300 % relativt til tilpasset side. Knip med to fingre på brosjyren for å zoome jevnt om punktet mellom fingrene (nettsiden selv zoomes ikke), eller dobbelttrykk/dobbeltklikk for å zoome inn til 200 % om trykkpunktet og ut igjen. Pluss- og minusknappene og tastene + og − zoomer i steg på 25 % om midten. I forstørret side flytter én finger eller et musedrag bildet, med fart som ebber ut etter et raskt drag, uten å bla. Klikk prosenttallet for å tilpasse på nytt. Zoom nullstilles ved sidebytte.
 - Berøringsmålene er minst 44 × 44 px, også pilene på telefon, som ser ut som før, men tar imot trykk over et større felt.
 - Fullskjerm på nettlesere og innbygginger som støtter/tillater det. Knappen skjules når funksjonen ikke er tilgjengelig.
+- Tre rammevarianter med `chrome`: full mørk boks, gjennomsiktig med knapper, eller bare boken.
 - Flere uavhengige visere på samme side; `src` kan endres dynamisk.
 - Lastestatus, feilbeskjeder, tastaturfokus og redusert bevegelse.
 

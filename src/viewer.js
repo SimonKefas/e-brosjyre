@@ -51,11 +51,14 @@ const PERSPECTIVE = 2400;
 const RAD = Math.PI / 180;
 // How pages are shown (the `spread` attribute): two by two (the default), one at a time, or one only when the stage is too narrow.
 const SPREADS = ['always', 'single', 'auto'];
+// How much of the viewer's own frame shows (the `chrome` attribute): the dark box with toolbar and arrows (the default), the same
+// controls on a transparent background, or the book alone.
+const CHROMES = ['full', 'minimal', 'none'];
 // Assumed page format until a PDF has loaded, so the frame starts at the size most brochures end up with.
 const A4 = { width: 595, height: 842 };
 
 class EBrosjyre extends HTMLElement {
-  static observedAttributes = ['src', 'title', 'spread'];
+  static observedAttributes = ['src', 'title', 'spread', 'chrome'];
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
@@ -116,6 +119,7 @@ class EBrosjyre extends HTMLElement {
       this.$('.full').title = active ? 'Avslutt fullskjerm' : 'Fullskjerm';
     });
     this.$('.full').hidden = !document.fullscreenEnabled || !this.requestFullscreen;
+    this.$('.reader').dataset.chrome = this.chrome;
     on(this.$('.reader'), 'keydown', e => {
       if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
       const actions = { ArrowLeft: () => this.navigate(-1), ArrowRight: () => this.navigate(1), Home: () => this.goTo(1), End: () => this.goTo(this.pdf?.numPages), '+': () => this.setZoom(this.zoom + .25), '-': () => this.setZoom(this.zoom - .25), '0': () => this.setZoom(1) };
@@ -189,16 +193,22 @@ class EBrosjyre extends HTMLElement {
     if (oldValue === newValue || !this.isConnected) return;
     if (name === 'src') this.load();
     else if (name === 'spread') this.relayout();
+    else if (name === 'chrome') { this.$('.reader').dataset.chrome = this.chrome; this.relayout(); }
     else this.$('.reader').setAttribute('aria-label', this.getAttribute('title') || 'PDF-brosjyre');
   }
   get motion() { return !matchMedia('(prefers-reduced-motion: reduce)').matches; }
-  // Room around the pages: the arrow buttons sit inside the stage and may overlap the page edges a little.
-  get marginX() { return matchMedia('(max-width: 600px)').matches ? 28 : 48; }
+  // Room around the pages: the arrow buttons sit inside the stage and may overlap the page edges a little. Without them (chrome="none")
+  // only the spread's own padding is left.
+  get marginX() { return this.chrome === 'none' || matchMedia('(max-width: 600px)').matches ? 28 : 48; }
   get stageWidth() { return this.$('.stage').clientWidth - this.marginX; }
   get stageHeight() { return this.$('.stage').clientHeight - 32; }
   get spread() {
     const value = this.getAttribute('spread')?.trim().toLowerCase();
     return SPREADS.includes(value) ? value : 'always';
+  }
+  get chrome() {
+    const value = this.getAttribute('chrome')?.trim().toLowerCase();
+    return CHROMES.includes(value) ? value : 'full';
   }
   // The book model: two pages side by side, one at a time with spread="single", and with spread="auto" one only when the stage
   // is truly narrow (a page would get under 230 px, roughly a phone).
@@ -207,13 +217,14 @@ class EBrosjyre extends HTMLElement {
     const typical = this.typical ?? A4;
     return Math.min(this.stageWidth / 2, this.stageHeight * typical.width / typical.height) < 230;
   }
-  // Shape the frame to what it shows: the typical view (a spread, or one page) filling the width, plus the toolbar.
+  // Shape the frame to what it shows: the typical view (a spread, or one page) filling the width, plus the toolbar (none with
+  // chrome="none", where it is laid over the stage).
   // A spread wants a wide, low frame and a single page a tall one. A height the page sets on the element wins, as outer styles beat :host.
   fit() {
     if (!this.clientWidth) return;
     const typical = this.typical ?? A4;
-    const chrome = this.$('.reader').clientHeight - this.$('.stage').clientHeight;
-    const height = this.stageWidth / (this.single ? 1 : 2) * typical.height / typical.width + 32 + chrome;
+    const toolbar = this.$('.reader').clientHeight - this.$('.stage').clientHeight;
+    const height = this.stageWidth / (this.single ? 1 : 2) * typical.height / typical.width + 32 + toolbar;
     const rule = `:host { --fit-height: ${Math.round(height)}px; }`;
     if (this.sizing.textContent !== rule) this.sizing.textContent = rule;
   }

@@ -43,11 +43,20 @@ $('#source-panel').addEventListener('submit', e => {
 });
 // Escape attribute values so URLs containing quotes cannot alter the generated markup.
 const attribute = value => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+// Frame around the viewer: the demo shows the choice live and carries it into the embed code.
+const chromes = [...document.querySelectorAll('.chrome-choices button')];
+const frame = value => {
+  viewer.setAttribute('chrome', value);
+  $('#embed-chrome').value = value;
+  for (const button of chromes) button.setAttribute('aria-pressed', String(button.dataset.chrome === value));
+};
+for (const button of chromes) button.addEventListener('click', () => frame(button.dataset.chrome));
+$('#embed-chrome').addEventListener('change', e => frame(e.target.value));
 $('#embed-form').addEventListener('submit', e => {
   e.preventDefault();
   const script = validateURL($('#script-url')), pdf = validateURL($('#embed-pdf'));
   if (!script || !pdf) return;
-  $('#embed-code').value = `<script type="module" src="${attribute(script.href)}"></script>\n<!-- spread: "always" = to og to sider, også på mobil. "auto" = én side på smale skjermer. "single" = alltid én side. -->\n<e-brosjyre\n  src="${attribute(pdf.href)}"\n  title="Brosjyre"\n  spread="${attribute($('#embed-spread').value)}"\n></e-brosjyre>`;
+  $('#embed-code').value = `<script type="module" src="${attribute(script.href)}"></script>\n<!-- spread: "always" = to og to sider, også på mobil. "auto" = én side på smale skjermer. "single" = alltid én side. -->\n<!-- chrome: "full" = mørk boks med verktøylinje. "minimal" = gjennomsiktig, med knapper. "none" = bare boken. -->\n<e-brosjyre\n  src="${attribute(pdf.href)}"\n  title="Brosjyre"\n  spread="${attribute($('#embed-spread').value)}"\n  chrome="${attribute($('#embed-chrome').value)}"\n></e-brosjyre>`;
   $('#embed-result').hidden = false;
   $('#copy-status').textContent = '';
 });
