@@ -24,9 +24,29 @@
 .slot.right .sheet::after { --shade:var(--shade-r, 0); --shade-w:var(--shade-rw, 0); }
 .slot.left .sheet::after { --shade:var(--shade-l, 0); --shade-w:var(--shade-lw, 0); }
 canvas, .blank { display:block; }
-canvas { cursor:grab; -webkit-user-drag:none; }
-.zoomed canvas { cursor:grab; }
-.dragging canvas { cursor:grabbing; }
+canvas { -webkit-user-drag:none; }
+.sheet { cursor:grab; }
+.dragging .sheet, .dragging .sheet * { cursor:grabbing; }
+/* The page's text, transparent over its canvas where the painted words are, so it can be selected, copied, found and read aloud.
+   Laid out by PDF.js' TextLayer; these rules are the part of its viewer stylesheet (web/pdf_viewer.css) that the layer needs.
+   --total-scale-factor is set per sheet to the scale the page is painted at. */
+.sheet { --scale-round-x:.01px; --scale-round-y:.01px; }
+.textLayer { position:absolute; inset:0; overflow:clip; text-align:initial; line-height:1; letter-spacing:normal; word-spacing:normal; text-size-adjust:none; -webkit-text-size-adjust:none; forced-color-adjust:none; transform-origin:0 0; color-scheme:only light; --min-font-size:1; --text-scale-factor:calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv:calc(1 / var(--min-font-size)); }
+.textLayer :is(span, br) { position:absolute; color:transparent; white-space:pre; cursor:text; transform-origin:0 0; user-select:text; -webkit-user-select:text; }
+.textLayer > :not(.markedContent), .textLayer .markedContent span:not(.markedContent) { --font-height:0; --scale-x:1; --rotate:0deg; font-size:calc(var(--text-scale-factor) * var(--font-height)); transform:rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
+.textLayer .markedContent { display:contents; }
+.textLayer ::selection { background:color-mix(in srgb, AccentColor, transparent 50%); color:transparent; }
+.textLayer br::selection { background:transparent; }
+:is(.textLayer, .links)[data-main-rotation="90"] { transform:rotate(90deg) translateY(-100%); }
+:is(.textLayer, .links)[data-main-rotation="180"] { transform:rotate(180deg) translate(-100%, -100%); }
+:is(.textLayer, .links)[data-main-rotation="270"] { transform:rotate(270deg) translateX(-100%); }
+/* The PDF's own links, as clickable areas over the page. */
+.links { position:absolute; inset:0; pointer-events:none; }
+.links a { position:absolute; display:block; width:auto; height:auto; border-radius:2px; pointer-events:auto; cursor:pointer; }
+.links a:focus-visible { outline-offset:0; }
+/* A turning leaf is drawn in WebGL, where no HTML can follow it: while one is on the table the text and links stand aside,
+   so nothing can be picked through the leaf. They are always laid out in their sheet, so they come back where the page is. */
+.turning :is(.textLayer, .links) { visibility:hidden; }
 button, a { -webkit-tap-highlight-color:transparent; }
 button { display:inline-flex; justify-content:center; align-items:center; width:44px; height:44px; border:0; border-radius:4px; background:transparent; color:inherit; cursor:pointer; font:inherit; transition:background .15s; }
 button:hover:not(:disabled), a:hover { background:#ffffff12; }
@@ -45,7 +65,7 @@ svg { width:21px; height:21px; }
 .zoom, .actions { display:flex; align-items:center; }
 .fit { width:66px; font-size:12px; font-variant-numeric:tabular-nums; }
 .actions { justify-self:end; }
-a { display:inline-flex; width:44px; height:44px; align-items:center; justify-content:center; border-radius:4px; color:inherit; }
+.actions a { display:inline-flex; width:44px; height:44px; align-items:center; justify-content:center; border-radius:4px; color:inherit; }
 a:not([href]) { display:none; }
 .message { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:32px; background:var(--reader-bg); pointer-events:none; }
 .message strong { font-size:19px; font-weight:500; }

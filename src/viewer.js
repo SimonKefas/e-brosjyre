@@ -1,4 +1,4 @@
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
+import { getDocument, GlobalWorkerOptions, setLayerDimensions, TextLayer } from 'pdfjs-dist';
 import styles from './viewer.css';
 import { Curl, curve } from './curl.js';
 
@@ -56,6 +56,8 @@ const SPREADS = ['always', 'single', 'auto'];
 const CHROMES = ['full', 'minimal', 'none'];
 // Assumed page format until a PDF has loaded, so the frame starts at the size most brochures end up with.
 const A4 = { width: 595, height: 842 };
+// Link targets a page may open. Anything else (javascript:, file:, data: …) is left unlinked.
+const SCHEMES = ['http:', 'https:', 'mailto:'];
 
 class EBrosjyre extends HTMLElement {
   static observedAttributes = ['src', 'title', 'spread', 'chrome'];
@@ -129,8 +131,11 @@ class EBrosjyre extends HTMLElement {
     const scroller = this.$('.scroller');
     const points = new Map(); // Pointer id → latest client position, for every pointer held down on the book.
     on(scroller, 'pointerdown', e => {
+      // A mouse or pen pressed on the text selects it, as anywhere on the web; a finger swipes there too and selects with a long press.
+      if (e.pointerType !== 'touch' && e.target.closest('.textLayer span')) return;
       points.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      try { scroller.setPointerCapture(e.pointerId); } catch {} // So its release is always seen here.
+      // So its release is always seen here. Not yet on a link, whose click would then go to the scroller: a drag captures it once it moves.
+      if (!e.target.closest('a')) try { scroller.setPointerCapture(e.pointerId); } catch {}
       if (!this.pdf) return;
       // A second finger pinches, unless the first is already turning a leaf: then it is a stray touch and the turn carries on.
       if (points.size === 2 && !this.pinch && !['turn', 'nudge'].includes(this.drag?.mode)) return this.startPinch(points);
@@ -160,6 +165,13 @@ class EBrosjyre extends HTMLElement {
     };
     on(scroller, 'pointerup', e => lift(e));
     on(scroller, 'pointercancel', e => lift(e, true));
+    // A link to a page in the same PDF turns there instead of leaving.
+    on(scroller, 'click', e => {
+      const link = e.target.closest('a[data-page]');
+      if (!link) return;
+      e.preventDefault();
+      this.goTo(Number(link.dataset.page));
+    });
     // Two fingers on the book are ours: keep the browser from scrolling or zooming the page under a pinch.
     scroller.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false, signal: this.events.signal });
     // The frame's height follows its width; it is applied a frame later, since resizing inside the observer would loop.
@@ -286,6 +298,7 @@ class EBrosjyre extends HTMLElement {
     this.offset = 0;
     this.book.style.transform = '';
     this.curl.clear();
+    this.$('.reader').classList.remove('turning');
     this.$('.slot.left').replaceChildren();
     this.$('.slot.right').replaceChildren();
   }
@@ -439,7 +452,8 @@ class EBrosjyre extends HTMLElement {
       canvas.style.width = `${viewport.width}px`;
       canvas.style.height = `${viewport.height}px`;
       canvas.setAttribute('role', 'img');
-      canvas.setAttribute('aria-label', `Side ${number}. Åpne original PDF for tekstlesing.`);
+      canvas.setAttribute('aria-label', `Side ${number}`);
+      entry.sheet.style.setProperty('--total-scale-factor', viewport.scale);
       entry.width = viewport.width;
       entry.height = viewport.height;
       entry.task = page.render({ canvasContext: canvas.getContext('2d'), viewport, transform: [density, 0, 0, density, 0, 0] });
@@ -448,6 +462,7 @@ class EBrosjyre extends HTMLElement {
       entry.done = true;
       this.curl.preload(canvas);
       this.layout();
+      this.annotate(number, page, viewport, entry).catch(() => {});
       return canvas;
     })();
     entry.promise.catch(() => { if (this.cache.get(number) === entry) this.cache.delete(number); });
@@ -481,6 +496,73 @@ class EBrosjyre extends HTMLElement {
       this.message('Siden kunne ikke vises', 'Prøv å bla videre, eller åpne original PDF.');
     }
   }
+  // Lay the page's text and links over its painted canvas, once it shows. Each is built off-DOM and added in one go.
+  async annotate(number, page, viewport, entry) {
+    const stale = () => this.cache.get(number) !== entry;
+    const text = document.createElement('div');
+    text.className = 'textLayer';
+    const layer = new TextLayer({ textContentSource: await page.getTextContent(), container: text, viewport });
+    if (stale()) return;
+    await layer.render();
+    if (stale()) return;
+    entry.sheet.append(text);
+    // With its text on the page, a screen reader reads the page itself; the picture of it is then left out.
+    if (layer.textContentItemsStr.some(item => item.trim())) {
+      entry.canvas.removeAttribute('role');
+      entry.canvas.removeAttribute('aria-label');
+      entry.canvas.setAttribute('aria-hidden', 'true');
+      entry.sheet.setAttribute('role', 'group');
+      entry.sheet.setAttribute('aria-label', `Side ${number}`);
+    } else entry.canvas.setAttribute('aria-label', `Side ${number}. Siden har ingen tekst som kan leses opp.`);
+    const links = await this.links(page, viewport);
+    if (stale() || !links.length) return;
+    const container = document.createElement('div');
+    container.className = 'links';
+    setLayerDimensions(container, viewport); // Sized and turned like the text layer, so both share the page's unrotated layout.
+    container.append(...links);
+    entry.sheet.append(container);
+  }
+  // The page's link annotations as anchors placed over their areas: web and mail links open outside, links to a page in the
+  // document turn there (see the click handler on the scroller).
+  async links(page, viewport) {
+    const annotations = await page.getAnnotations();
+    const pdf = this.pdf;
+    const anchors = await Promise.all(annotations.filter(a => a.subtype === 'Link').map(async annotation => {
+      const a = document.createElement('a');
+      if (annotation.dest) {
+        const number = await this.destinationPage(pdf, annotation.dest).catch(() => null);
+        if (!number) return null;
+        a.href = `#side-${number}`;
+        a.dataset.page = number;
+        a.setAttribute('aria-label', `Gå til side ${number}`);
+      } else {
+        let url;
+        try { url = new URL(annotation.url ?? annotation.unsafeUrl); } catch { return null; }
+        if (!SCHEMES.includes(url.protocol)) return null;
+        a.href = url.href;
+        a.rel = 'noopener noreferrer';
+        let address = url.pathname;
+        try { address = decodeURIComponent(address); } catch {}
+        if (url.protocol === 'mailto:') a.setAttribute('aria-label', `E-post til ${address}`);
+        else { a.target = '_blank'; a.setAttribute('aria-label', `${url.href} (åpnes i ny fane)`); }
+      }
+      // The rectangle in the page's own, unrotated layout, as fractions of it, like the text layer's runs.
+      const [x1, y1, x2, y2] = annotation.rect, { pageWidth, pageHeight, pageX, pageY } = viewport.rawDims;
+      a.style.left = `${(Math.min(x1, x2) - pageX) / pageWidth * 100}%`;
+      a.style.top = `${(pageY + pageHeight - Math.max(y1, y2)) / pageHeight * 100}%`;
+      a.style.width = `${Math.abs(x2 - x1) / pageWidth * 100}%`;
+      a.style.height = `${Math.abs(y2 - y1) / pageHeight * 100}%`;
+      return a;
+    }));
+    return anchors.filter(Boolean);
+  }
+  // The page number a link destination points to: a named destination or an explicit one, whose first entry is the page.
+  async destinationPage(pdf, dest) {
+    const explicit = typeof dest === 'string' ? await pdf.getDestination(dest) : dest;
+    const [ref] = explicit ?? [];
+    const index = Number.isInteger(ref) ? ref : ref && typeof ref === 'object' ? await pdf.getPageIndex(ref) : null;
+    return index !== null && index >= 0 && index < pdf.numPages ? index + 1 : null;
+  }
   // Put a page's sheet into a slot; a blank sheet stands in until it is painted.
   fill(container, number) {
     const entry = number ? this.cache.get(number) : null;
@@ -509,6 +591,7 @@ class EBrosjyre extends HTMLElement {
     this.book.style.width = `${leftWidth + rightWidth}px`;
     this.book.style.height = `${height}px`;
     this.book.classList.toggle('double', !this.single);
+    this.$('.reader').classList.toggle('turning', this.leaves.length > 0);
     this.$('.slot.left').style.width = `${leftWidth}px`;
     this.$('.slot.right').style.width = `${rightWidth}px`;
     this.$('.slot.right').style.left = `${leftWidth}px`;
@@ -652,6 +735,7 @@ class EBrosjyre extends HTMLElement {
       if (Math.hypot(dx, dy) < 8) return;
       drag.axis = drag.pan ? 'both' : Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
       if (drag.axis === 'y') return this.endDrag();
+      try { this.$('.scroller').setPointerCapture(drag.id); } catch {}
     }
     if (drag.pan) {
       const scroller = this.$('.scroller');

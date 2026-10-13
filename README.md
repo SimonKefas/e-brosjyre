@@ -104,11 +104,13 @@ Hvis viseren viser en feil, kontroller offentlig tilgang, CORS, at lenken return
 - Zoom 100–300 % relativt til tilpasset side. Knip med to fingre på brosjyren for å zoome jevnt om punktet mellom fingrene (nettsiden selv zoomes ikke), eller dobbelttrykk/dobbeltklikk for å zoome inn til 200 % om trykkpunktet og ut igjen. Pluss- og minusknappene og tastene + og − zoomer i steg på 25 % om midten. I forstørret side flytter én finger eller et musedrag bildet, med fart som ebber ut etter et raskt drag, uten å bla. Klikk prosenttallet for å tilpasse på nytt. Zoom nullstilles ved sidebytte.
 - Berøringsmålene er minst 44 × 44 px, også pilene på telefon, som ser ut som før, men tar imot trykk over et større felt.
 - Fullskjerm på nettlesere og innbygginger som støtter/tillater det. Knappen skjules når funksjonen ikke er tilgjengelig.
+- Tekstlag: PDF-ens egen tekst ligger usynlig over hver side, nøyaktig der ordene er tegnet. Med mus eller penn markerer du tekst ved å dra over den og kopierer som vanlig; et drag som starter utenfor teksten blar. På berøringsskjerm blar et sveip også over tekst, og et langt trykk markerer. Skjermlesere leser sideteksten i stedet for et bilde av siden. Mens et blad vendes, er tekstlaget borte, og det kommer tilbake når bladet har landet.
+- Lenker i PDF-en er klikkbare. Nettlenker (`http`, `https`) åpnes i ny fane med `rel="noopener noreferrer"`, `mailto`-lenker åpner e-postprogrammet, og lenker til en side i samme PDF blar dit. Andre lenketyper, som `javascript:` og `file:`, blir ikke klikkbare.
 - Tre rammevarianter med `chrome`: full mørk boks, gjennomsiktig med knapper, eller bare boken.
 - Flere uavhengige visere på samme side; `src` kan endres dynamisk.
 - Lastestatus, feilbeskjeder, tastaturfokus og redusert bevegelse.
 
-Sidene tegnes til canvas. PDF-tekst er ikke søkbar/markerbar i denne viseren, og PDF-lenker/skjemafelt er ikke interaktive. Skjermlesere får sidetall, kontroller og en lenke til original-PDF-en; selve PDF-innholdet har ikke et tilgjengelig tekstlag her. Bruk en korrekt tagget original-PDF for tilgjengelig dokumentlesing. Passordbeskyttede filer støttes ikke. Det er ingen søkefunksjon eller innholdsredigering.
+Sidene tegnes til canvas med tekstlaget over. Tekstlaget finnes bare for oppslaget som vises og nabooppslagene, så nettleserens egen søkefunksjon finner ikke tekst lenger ut i brosjyren. Viseren har heller ingen egen søkefunksjon. Sider uten tekst i PDF-en (for eksempel skannede bilder) har ikke noe å markere, og skjermlesere får bare vite at siden mangler lesbar tekst. Tekstlaget følger rekkefølgen i PDF-en, så en korrekt tagget PDF gir den beste opplesningen. Skjemafelt er ikke interaktive. Passordbeskyttede filer støttes ikke, og det er ingen innholdsredigering.
 
 ## Utvikling og verifisering
 
