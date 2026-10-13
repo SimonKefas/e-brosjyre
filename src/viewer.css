@@ -1,8 +1,8 @@
-:host { display:block; height:min(var(--fit-height, 78vh), 88svh); min-height:240px; color:#f6f4ee; color-scheme:dark; --reader-bg:#30312f; --reader-accent:#d4d8b6; }
+:host { display:block; height:min(var(--fit-height, 78vh), 88svh); min-height:240px; --reader-bg:#30312f; --reader-accent:#d4d8b6; }
 :host(:fullscreen) { width:100vw; height:100dvh; min-height:0; background:var(--reader-bg); }
 * { box-sizing:border-box; }
 [hidden] { display:none !important; }
-.reader { height:100%; display:flex; flex-direction:column; background:var(--reader-bg); font:14px/1.4 'Helvetica Neue', Helvetica, sans-serif; outline:none; overflow:hidden; }
+.reader { height:100%; display:flex; flex-direction:column; background:var(--reader-bg); color:#f6f4ee; color-scheme:dark; font:14px/1.4 'Helvetica Neue', Helvetica, sans-serif; outline:none; overflow:hidden; }
 .stage { flex:1; position:relative; min-height:0; }
 .scroller { position:absolute; inset:0; overflow:hidden; overscroll-behavior:contain; scrollbar-color:#6b6b65 transparent; user-select:none; -webkit-user-select:none; }
 .zoomed .scroller { overflow:auto; }
@@ -59,4 +59,23 @@ a:not([href]) { display:none; }
   .stage > .prev { left:0; padding-right:12px; } .stage > .next { right:0; padding-left:12px; } .prev::before { left:0; } .next::before { right:0; }
   .pages { font-size:12px; } .fit { width:50px; }
 }
+/* chrome="minimal": no surfaces of its own. The book is the only thing with a background; the controls take the page's text colour. */
+.reader:is([data-chrome=minimal], [data-chrome=none]) { background:transparent; color:inherit; color-scheme:normal; }
+:is([data-chrome=minimal], [data-chrome=none]) .message { background:transparent; }
+:is([data-chrome=minimal], [data-chrome=none]) .message p { color:inherit; opacity:.75; }
+:is([data-chrome=minimal], [data-chrome=none]) .spinner { border-color:color-mix(in srgb, currentColor 18%, transparent); border-top-color:currentColor; }
+[data-chrome=minimal] .toolbar, [data-chrome=minimal] .stage > button, [data-chrome=minimal] .stage > button::before { background:none; }
+[data-chrome=minimal] :is(button, a):hover:not(:disabled) { background:color-mix(in srgb, currentColor 10%, transparent); }
+[data-chrome=minimal] .pages { color:inherit; }
+[data-chrome=minimal] .progress { accent-color:currentColor; }
+:is([data-chrome=minimal], [data-chrome=none]) :focus-visible, .reader:is([data-chrome=minimal], [data-chrome=none]):focus-visible { outline-color:currentColor; }
+/* chrome="none": the book alone. The arrows and the toolbar stay for screen readers and the keyboard, visually hidden until one of them
+   has keyboard focus; then it shows over the stage in the full look, so no room is ever reserved for it. */
+[data-chrome=none] { position:relative; }
+[data-chrome=none] .toolbar { position:absolute; left:0; right:0; bottom:0; z-index:1; color:#f6f4ee; color-scheme:dark; }
+[data-chrome=none] .stage > button { color:#f6f4ee; }
+[data-chrome=none] .stage > button:not(:focus-visible), [data-chrome=none] .toolbar:not(:focus-within) { width:1px; height:1px; margin:0; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+[data-chrome=none] :focus-visible { outline-color:var(--reader-accent); }
+/* In fullscreen the page around the viewer is gone, so every variant gets the dark box back. */
+:host(:fullscreen) .reader { background:var(--reader-bg); color:#f6f4ee; color-scheme:dark; }
 @media(prefers-reduced-motion:reduce) { * { animation:none !important; transition:none !important; } }
