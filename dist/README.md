@@ -89,9 +89,9 @@ Viseren sender tre hendelser fra `<e-brosjyre>`-elementet. Bruk dem for eksempel
 | --- | --- | --- |
 | `brochure-ready` | Én gang når PDF-en er lastet og de første sidene vises. | `{ page, pages, total }` |
 | `brochure-page` | Hver gang leseren lander på et nytt oppslag, også det første. Sendes når bladet har landet, ikke underveis i en vending, og bare én gang for det samme oppslaget. Zoom og endret vindusstørrelse sender ingenting så lenge de samme sidene vises. | `{ page, pages, total }` |
-| `brochure-error` | Når PDF-en ikke kan åpnes. | `{ message }` |
+| `brochure-error` | Når PDF-en ikke kan åpnes. | `{ reason, message }` |
 
-`page` er første side i oppslaget som vises, `pages` er sidene som faktisk vises (én eller to, for eksempel `[6, 7]`), og `total` er antall sider i PDF-en. `message` er feilmeldingen leseren ser.
+`page` er første side i oppslaget som vises, `pages` er sidene som faktisk vises (én eller to, for eksempel `[6, 7]`), og `total` er antall sider i PDF-en. `message` er feilmeldingen leseren ser, og `reason` er årsaken som kode (se [Når PDF-en ikke kan åpnes](#når-pdf-en-ikke-kan-åpnes)).
 
 ```html
 <script>
@@ -102,7 +102,7 @@ Viseren sender tre hendelser fra `<e-brosjyre>`-elementet. Bruk dem for eksempel
     console.log(`Leser side ${e.detail.pages.join('–')} av ${e.detail.total}`);
     // For eksempel: gtag('event', 'brosjyre_side', { side: sist, av: e.detail.total });
   });
-  brosjyre.addEventListener('brochure-error', e => console.warn(e.detail.message));
+  brosjyre.addEventListener('brochure-error', e => console.warn(e.detail.reason, e.detail.message));
 </script>
 ```
 
@@ -164,7 +164,33 @@ En respons som viser CORS-tilgang kan kontrolleres med:
 curl -I -H 'Origin: https://DIN-NETTSIDE.no' 'https://DIN-PDFVERT.no/brosjyre.pdf'
 ```
 
-Hvis viseren viser en feil, kontroller offentlig tilgang, CORS, at lenken returnerer PDF-data og at PDF-en ikke har passord. **Åpne original PDF** gir direkte tilgang til filen når URL-en er gyldig.
+## Når PDF-en ikke kan åpnes
+
+Mens PDF-en lastes, viser viseren hvor mye som er hentet, for eksempel «1,2 MB av 3,9 MB». Sender
+filverten ikke filstørrelsen (`Content-Length`), vises bare mengden som er hentet, uten fremdriftslinje.
+
+Går noe galt, sier viseren hva det er, og tilbyr **Prøv igjen** og **Åpne PDF-en** der det kan hjelpe.
+Knappene vises over brosjyren og virker også med `chrome="none"`. Prøv igjen laster PDF-en på nytt uten
+at nettsiden lastes om.
+
+| `reason` | Leseren ser | Årsak |
+| --- | --- | --- |
+| `stalled` | Lastingen står stille | Ingenting nytt har kommet fram på 15 sekunder. Lastingen fortsetter, og meldingen forsvinner av seg selv hvis data begynner å komme igjen. Sendes ikke som `brochure-error`. |
+| `slow` | Dette tar lang tid | Viseren har ikke kommet i gang etter ett minutt (PDF.js-arbeideren er ikke lastet). Sendes ikke som `brochure-error`. |
+| `network` | Ingen forbindelse | Filverten kunne ikke nås: nettverksbrudd, feil vertsnavn eller en vert som er nede. |
+| `offline` | Du er uten nett | Nettleseren melder at enheten er frakoblet. |
+| `broken` | Forbindelsen ble brutt | Filverten svarte, men forbindelsen falt ut underveis. |
+| `cors` | Kunne ikke vise brosjyren her | Filverten svarer, men tillater ikke at nettsiden leser filen. Se [Hosting og CORS](#hosting-og-cors). |
+| `missing` | Fant ikke brosjyren | Filverten svarte 404. |
+| `status` | Kunne ikke åpne brosjyren | Filverten svarte med en annen feilkode, for eksempel 403 eller 500. |
+| `not-pdf` | Kunne ikke åpne brosjyren | Lenken gir noe annet enn en PDF, for eksempel en nettside. |
+| `password` | Brosjyren er passordbeskyttet | PDF-en krever passord. |
+| `invalid-url` | Kunne ikke åpne brosjyren | `src` er ikke en http- eller https-lenke. |
+| `setup` | Kunne ikke starte viseren | Viserens egne filer lot seg ikke laste, ofte på grunn av nettstedets innholdspolicy (CSP). |
+
+Nettleseren skiller ikke en CORS-avvisning fra et nettverksbrudd. Viseren spør derfor filverten
+én gang til for å finne ut hvilken det er. Den forespørselen er en `HEAD` uten data og sendes bare
+etter en feil.
 
 ## Leserfunksjoner
 

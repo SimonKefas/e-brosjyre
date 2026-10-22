@@ -95,6 +95,17 @@ a:not([href]) { display:none; }
 .message { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:32px; background:var(--reader-bg); pointer-events:none; }
 .message strong { font-size:19px; font-weight:500; }
 .message p { max-width:420px; color:#c0c0b7; font-size:14px; line-height:1.6; margin:10px 0 0; }
+/* The download's progress, and the way out of a failed or stalled one: try again, or open the file directly. */
+.loaded { display:flex; flex-direction:column; align-items:center; gap:8px; margin-top:16px; width:min(240px, 100%); }
+.loaded progress { appearance:none; -webkit-appearance:none; display:block; width:100%; height:4px; border:0; border-radius:2px; overflow:hidden; background:#ffffff25; color:var(--reader-accent); }
+.loaded progress::-webkit-progress-bar { background:transparent; }
+.loaded progress::-webkit-progress-value { background:currentColor; transition:width .2s; }
+.loaded progress::-moz-progress-bar { background:currentColor; }
+.amount { font-size:13px; font-variant-numeric:tabular-nums; color:#c0c0b7; }
+.choices { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; pointer-events:auto; }
+.choices > * { width:auto; min-height:44px; margin-top:18px; padding:0 18px; border-radius:4px; font-size:14px; text-decoration:none; color:inherit; display:inline-flex; align-items:center; border:1px solid color-mix(in srgb, currentColor 35%, transparent); }
+.reader .choices .retry { background:var(--reader-accent); color:#222320; border-color:transparent; }
+.reader .choices .retry:hover { background:color-mix(in srgb, var(--reader-accent), #fff 20%); }
 .spinner { width:26px; height:26px; margin-bottom:18px; border:2px solid #ffffff25; border-top-color:var(--reader-accent); border-radius:50%; animation:spin 1s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
 @media(max-width:600px) {
@@ -109,6 +120,9 @@ a:not([href]) { display:none; }
 .reader:is([data-chrome=minimal], [data-chrome=none]) { background:transparent; color:inherit; color-scheme:normal; }
 :is([data-chrome=minimal], [data-chrome=none]) .message { background:transparent; }
 :is([data-chrome=minimal], [data-chrome=none]) .message p { color:inherit; opacity:.75; }
+:is([data-chrome=minimal], [data-chrome=none]) .loaded progress { background:color-mix(in srgb, currentColor 18%, transparent); color:inherit; }
+:is([data-chrome=minimal], [data-chrome=none]) .amount { color:inherit; opacity:.75; }
+.reader:is([data-chrome=minimal], [data-chrome=none]) .choices .retry { background:none; color:inherit; border-color:currentColor; }
 :is([data-chrome=minimal], [data-chrome=none]) .spinner { border-color:color-mix(in srgb, currentColor 18%, transparent); border-top-color:currentColor; }
 [data-chrome=minimal] .toolbar, [data-chrome=minimal] .stage > button, [data-chrome=minimal] .stage > button::before { background:none; }
 [data-chrome=minimal] :is(button, a):hover:not(:disabled) { background:color-mix(in srgb, currentColor 10%, transparent); }
