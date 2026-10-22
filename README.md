@@ -125,6 +125,31 @@ Hvis du foretrekker en iframe, bruk `viewer.html` fra publiseringspakken på din
 ></iframe>
 ```
 
+## Størrelsen på PDF-en avgjør ventetiden
+
+Hele PDF-en lastes ned før første side vises. Nettleseren får ikke lese `Accept-Ranges` fra en
+annen kilde, så PDF.js kan ikke hente bare de sidene leseren trenger når filen ligger på et
+annet opphav enn nettsiden. Filstørrelsen er derfor den viktigste enkeltfaktoren for hvor
+lenge leseren venter.
+
+Målt på en Pixel 7-profil med CPU strupet 4x, median av tre kjøringer, tid til første side:
+
+| Nettverk | 7 KB | 3,9 MB | 2,3 MB (samme katalog, web-eksport) |
+| --- | --- | --- | --- |
+| Rask 4G (8,1 Mbit/s) | 1,4 s | 5,7 s | 4,1 s |
+| Treg 4G (1,44 Mbit/s) | 5,4 s | 29,1 s | 20,0 s |
+| 3G (0,4 Mbit/s) | 18,9 s | 104 s | — |
+
+**Eksporter for skjerm, ikke for trykk.** En trykkeri-PDF bærer med seg ting som ikke gjør
+nytte på nett: CMYK-bilder, innebygde ICC-profiler (en fargeprofil alene kan være rundt
+500 KB), skjæremerker og bilder i 300 dpi. I Acrobat heter det «Reduser filstørrelse» eller
+«Lagre som annet → Optimalisert PDF»; i InDesign er det eksportforvalget «[Minste filstørrelse]»
+med RGB-farger og bildeoppløsning rundt 150 dpi. Sikt mot **under 2 MB** for en brosjyre som
+skal leses på mobil.
+
+Går filen ikke under uten at kvaliteten ryker, er det bedre å dele den i flere kortere
+brosjyrer enn å la leseren vente.
+
 ## Hosting og CORS
 
 - **PDF:** Når PDF-en ligger på et annet opphav enn nettsiden, må PDF-verten sende `Access-Control-Allow-Origin` med nettsidens opphav eller `*`. I iframe-varianten er det viservertens opphav som må tillates. Dette avgjøres av filvertens respons, ikke av en innstilling i viseren. Test den konkrete Webflow Assets-lenken på den publiserte siden.
