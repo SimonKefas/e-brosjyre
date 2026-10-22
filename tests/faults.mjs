@@ -2,10 +2,11 @@
 // messages can be checked against real network behaviour (CORS, status codes, stalls, dropped connections, missing length).
 // URL: /<mode>/<file>, e.g. /stall/demo.pdf. Query: chunk (bytes per write) and delay (ms between writes) trickle the body;
 // key + fails make /flaky/ drop the first `fails` requests for that key and serve normally afterwards; /pause/ sends 1 kB, waits
-// `pause` ms and sends the rest. stor.pdf is a 1.5 MB document (six pages and an incompressible attachment) for throttled runs.
+// `pause` ms and sends the rest; /cut/ serves ranges but cuts the whole-file stream halfway. stor.pdf is a 1.5 MB document (six pages and an incompressible attachment) for throttled runs.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 import { PDFDocument } from 'pdf-lib';
 
@@ -40,11 +41,15 @@ export async function handle(req, res) {
   const body = name === 'stor.pdf' ? await (large ??= bigPDF()) : await readFile(files[name]);
   const key = url.searchParams.get('key');
   const failing = mode === 'flaky' && (attempts.set(key, (attempts.get(key) || 0) + 1).get(key) <= Number(url.searchParams.get('fails') || 1));
-  const range = mode === 'ok' || mode === 'flaky' ? parseRange(req.headers.range, body.length) : null;
+  // ok and cut serve byte ranges (cut drops the whole-file stream halfway); the other modes ignore Range and answer 200.
+  const ranged = mode === 'ok' || mode === 'cut';
+  const range = ranged ? parseRange(req.headers.range, body.length) : null;
   const [start, end] = range || [0, body.length - 1];
+  // gzip: compressed whatever the request asked for, Content-Length the compressed size, no ranges.
+  if (mode === 'gzip') { const zipped = gzipSync(body); res.writeHead(200, { ...cors, 'Content-Type': 'application/pdf', 'Content-Encoding': 'gzip', 'Content-Length': zipped.length }); return res.end(zipped); }
   const headers = { ...cors, 'Content-Type': name.endsWith('.css') ? 'text/css' : 'application/pdf', 'Cache-Control': 'no-store' };
   if (mode !== 'nolength') headers['Content-Length'] = end - start + 1;
-  if (mode === 'ok' || mode === 'flaky') headers['Accept-Ranges'] = 'bytes';
+  if (ranged) headers['Accept-Ranges'] = 'bytes';
   if (range) headers['Content-Range'] = `bytes ${start}-${end}/${body.length}`;
   res.writeHead(range ? 206 : 200, headers);
   const part = body.subarray(start, end + 1);
@@ -52,7 +57,7 @@ export async function handle(req, res) {
   // stall: the first bytes, then silence on an open connection. drop: half the file, then the connection is cut.
   if (mode === 'stall') return res.write(part.subarray(0, 1024));
   if (mode === 'pause') { res.write(part.subarray(0, 1024)); await wait(Number(url.searchParams.get('pause'))); return res.end(part.subarray(1024)); }
-  if (mode === 'drop' || failing) { res.write(part.subarray(0, part.length >> 1)); await wait(50); return res.destroy(); }
+  if (mode === 'drop' || failing || (mode === 'cut' && start === 0 && end === body.length - 1)) { res.write(part.subarray(0, part.length >> 1)); await wait(50); return res.destroy(); }
   const chunk = Number(url.searchParams.get('chunk') || part.length), delay = Number(url.searchParams.get('delay') || 0);
   for (let i = 0; i < part.length; i += chunk) {
     if (i) await wait(delay);

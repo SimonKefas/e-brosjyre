@@ -7,7 +7,7 @@
     "build": "node scripts/build.mjs",
     "dev": "npm run build && node scripts/serve.mjs",
     "test": "npm run build && playwright test",
-    "check": "node --check src/viewer.js && node --check src/curl.js && node --check public/demo.js && node --check scripts/build.mjs"
+    "check": "node --check src/viewer.js && node --check src/curl.js && node --check src/source.js && node --check public/demo.js && node --check scripts/build.mjs"
   },
   "dependencies": {
     "pdfjs-dist": "6.3.289"

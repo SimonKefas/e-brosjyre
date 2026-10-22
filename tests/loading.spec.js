@@ -19,8 +19,8 @@ async function open(page, [path, chrome], src) {
     await reader(page).evaluate((el, value) => el.setAttribute('src', value), src);
   } else await page.goto(`${path}?${new URLSearchParams({ src, ...(chrome && { chrome }) })}`);
 }
-// The download is under way (PDF.js' worker runs and the request is out); only from here is silence a stalled download.
-const downloading = page => expect.poll(() => reader(page).evaluate(el => !!el.loadingTask)).toBe(true);
+// The download is under way and PDF.js has the document; from here on the only timer running is the one for the download.
+const downloading = page => expect.poll(() => reader(page).evaluate(el => !!el.loadingTask || !!el.source?.busy)).toBe(true);
 const errors = page => page.evaluate(() => { window.failures = []; document.querySelector('e-brosjyre').addEventListener('brochure-error', e => window.failures.push(e.detail.reason)); });
 
 for (const host of hosts) {
@@ -108,11 +108,16 @@ test('going offline says so, and coming back online, try again opens the brochur
 test.describe('a download that stands still', () => {
   test('is reported after the threshold, with the bytes so far and a way out', async ({ page }) => {
     await page.clock.install();
+    // The worker is held back until the first 10 s have passed: its arrival is no sign of life, so the count must run on.
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    await page.route('**/pdf.worker.min.mjs', async route => { await held; await route.continue(); });
     await page.goto(`/viewer.html?src=${encodeURIComponent(`${faults}/stall/demo.pdf`)}`);
     await expect(reader(page).locator('.amount')).toHaveText('1 kB av 7 kB');
-    await downloading(page);
     await page.clock.fastForward(10_000);
     await expect(status(page)).toHaveText('Laster brosjyren …');
+    release();
+    await expect.poll(() => reader(page).evaluate(el => !!el.loadingTask)).toBe(true);
     await page.clock.fastForward(6_000);
     await expect(status(page).locator('strong')).toHaveText('Lastingen står stille');
     await expect(status(page).locator('p')).toContainText('15 sekunder');
@@ -171,4 +176,52 @@ test('throttled network: progress climbs in steps and the brochure opens (Chromi
   await expect(reader(page).locator('.amount')).toHaveText(/MB lastet ned|kB lastet ned/);
   await expect(reader(page).locator('.loaded progress')).toBeHidden();
   await ready(page);
+});
+
+// A host that serves byte ranges across origins without exposing Accept-Ranges, as Webflow's asset CDN does: the viewer learns
+// it from the 206 answer and lets PDF.js fetch the parts it needs first, so page 1 shows before the whole file has arrived.
+test.describe('progressive loading from a host with byte ranges', () => {
+  for (const host of hosts) {
+    test(`${host[0]}${host[1] ? ` chrome=${host[1]}` : ''}: page 1 shows long before the file is in`, async ({ page }) => {
+      const ranges = [];
+      page.on('request', request => { if (request.url().startsWith(faults)) ranges.push(request.headers().range); });
+      // The whole-file stream takes about 9 s here (1.5 MB in 16 kB steps every 100 ms).
+      await open(page, host, `${faults}/ok/stor.pdf?chunk=16384&delay=100`);
+      await ready(page);
+      const { loaded, length, ranged } = await reader(page).evaluate(el => ({ loaded: el.source.loaded, length: el.source.length, ranged: el.source.ranges }));
+      expect(ranged).toBe(true);
+      expect(loaded).toBeLessThan(length / 2);
+      expect(ranges[0]).toBe('bytes=0-');
+      expect(ranges.slice(1).length).toBeGreaterThan(0);
+      for (const range of ranges.slice(1)) expect(range).toMatch(/^bytes=\d+-\d+$/);
+      await expect(reader(page).locator('.pages')).toHaveText('1 / 6');
+      await reader(page).locator('.reader').press('End');
+      await expect(reader(page).locator('.pages')).toHaveText('6 / 6');
+      await expect(reader(page).locator('.slot canvas')).toHaveCount(1);
+    });
+  }
+
+  test('a cut whole-file stream is made up for with ranges, and the brochure still opens', async ({ page }) => {
+    await page.goto(`/viewer.html?src=${encodeURIComponent(`${faults}/cut/stor.pdf`)}`);
+    await ready(page);
+    await reader(page).locator('.reader').press('End');
+    await expect(reader(page).locator('.pages')).toHaveText('6 / 6');
+    await ready(page);
+  });
+
+  test('a host that compresses the file anyway still opens it, with no bar measured against the compressed size', async ({ page }) => {
+    await page.goto(`/viewer.html?src=${encodeURIComponent(`${faults}/gzip/stor.pdf`)}`);
+    await ready(page);
+    await expect(reader(page).locator('.pages')).toHaveText('1 / 6');
+    expect(await reader(page).evaluate(el => el.source.ranges)).toBe(false);
+  });
+
+  test('a host without ranges gets one plain download, as before', async ({ page }) => {
+    const requests = [];
+    page.on('request', request => { if (request.url().startsWith(faults)) requests.push(request.headers().range); });
+    await page.goto(`/viewer.html?src=${encodeURIComponent(`${faults}/nolength/demo.pdf`)}`);
+    await ready(page);
+    expect(requests).toEqual(['bytes=0-']);
+    expect(await reader(page).evaluate(el => el.source.ranges)).toBe(false);
+  });
 });

@@ -127,18 +127,41 @@ Hvis du foretrekker en iframe, bruk `viewer.html` fra publiseringspakken på din
 
 ## Størrelsen på PDF-en avgjør ventetiden
 
-Hele PDF-en lastes ned før første side vises. Nettleseren får ikke lese `Accept-Ranges` fra en
-annen kilde, så PDF.js kan ikke hente bare de sidene leseren trenger når filen ligger på et
-annet opphav enn nettsiden. Filstørrelsen er derfor den viktigste enkeltfaktoren for hvor
-lenge leseren venter.
+Filstørrelsen er den viktigste enkeltfaktoren for hvor lenge leseren venter.
 
-Målt på en Pixel 7-profil med CPU strupet 4x, median av tre kjøringer, tid til første side:
+Målt på en Pixel 7-profil med CPU strupet 4x, median av tre kjøringer, tid til første side,
+før viseren lærte å hente PDF-en i deler:
 
 | Nettverk | 7 KB | 3,9 MB | 2,3 MB (samme katalog, web-eksport) |
 | --- | --- | --- | --- |
 | Rask 4G (8,1 Mbit/s) | 1,4 s | 5,7 s | 4,1 s |
 | Treg 4G (1,44 Mbit/s) | 5,4 s | 29,1 s | 20,0 s |
 | 3G (0,4 Mbit/s) | 18,9 s | 104 s | — |
+
+### Henting i deler
+
+Når filverten støtter område-forespørsler (`Range`), henter viseren først det PDF.js trenger for
+side 1, mens resten av filen lastes ned i bakgrunnen. Det virker også når PDF-en ligger på et annet
+opphav enn nettsiden. Nettleseren skjuler `Accept-Ranges` for andre opphav, så viseren spør i stedet
+etter `Range: bytes=0-` og ser på svaret: `206` betyr at verten støtter det. Webflows filvert
+(`cdn.prod.website-files.com`) svarer slik. Svarer verten `200`, hentes hele filen som før.
+
+Målt med PDF-en på et annet opphav enn viseren, med de samme svarhodene som Webflows filvert
+(Pixel 7-profil, CPU strupet 4x, median av tre kjøringer, tid til første side i sekunder):
+
+| Nettverk | Fil | Før | Etter |
+| --- | --- | --- | --- |
+| Rask 4G (8,1 Mbit/s) | 7 KB | 2,2 | 2,1 |
+| Rask 4G (8,1 Mbit/s) | 3,9 MB | 6,4 | 5,3 |
+| Treg 4G (1,44 Mbit/s) | 7 KB | 10,6 | 10,5 |
+| Treg 4G (1,44 Mbit/s) | 3,9 MB | 33,9 | 25,7 |
+
+3G ble ikke målt etter endringen. Viserens egne filer ble servert ukomprimert fra en lokal
+server, så tallene er høyere enn i tabellen over; det er forskjellen mellom før og etter som teller.
+
+For en liten PDF endrer det nesten ingenting, fordi det da er viserens egne filer som tar tid.
+For den store PDF-en på treg 4G gikk ventetiden ned med en firedel, men 25,7 sekunder er fortsatt
+altfor lenge. Henting i deler gjør ikke en for stor PDF liten nok.
 
 **Eksporter for skjerm, ikke for trykk.** En trykkeri-PDF bærer med seg ting som ikke gjør
 nytte på nett: CMYK-bilder, innebygde ICC-profiler (en fargeprofil alene kan være rundt
@@ -176,7 +199,7 @@ at nettsiden lastes om.
 | `reason` | Leseren ser | Årsak |
 | --- | --- | --- |
 | `stalled` | Lastingen står stille | Ingenting nytt har kommet fram på 15 sekunder. Lastingen fortsetter, og meldingen forsvinner av seg selv hvis data begynner å komme igjen. Sendes ikke som `brochure-error`. |
-| `slow` | Dette tar lang tid | Viseren har ikke kommet i gang etter ett minutt (PDF.js-arbeideren er ikke lastet). Sendes ikke som `brochure-error`. |
+| `slow` | Dette tar lang tid | PDF-en er hentet, men viseren har ikke kommet i gang etter ett minutt (PDF.js-arbeideren er ikke lastet). Sendes ikke som `brochure-error`. |
 | `network` | Ingen forbindelse | Filverten kunne ikke nås: nettverksbrudd, feil vertsnavn eller en vert som er nede. |
 | `offline` | Du er uten nett | Nettleseren melder at enheten er frakoblet. |
 | `broken` | Forbindelsen ble brutt | Filverten svarte, men forbindelsen falt ut underveis. |
