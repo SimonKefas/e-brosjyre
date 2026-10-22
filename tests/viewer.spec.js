@@ -3,6 +3,7 @@ import { PDFDocument, degrees, rgb } from 'pdf-lib';
 import { writeFile, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 const reader = page => page.locator('e-brosjyre');
+const port = Number(process.env.TEST_PORT || 4174);
 const leafCount = page => reader(page).first().evaluate(el => el.leaves.length);
 async function ready(page) {
   await expect(reader(page).locator('.sheet canvas').first()).toBeVisible();
@@ -121,9 +122,9 @@ test('rapid navigation and source changes settle on the newest request', async (
 
 test('invalid, missing, and non-PDF sources have readable errors and recover', async ({ page }) => {
   await page.goto('/viewer.html'); await ready(page);
-  for (const src of ['javascript:alert(1)', '/missing.pdf', '/demo.css']) {
+  for (const [src, title] of [['javascript:alert(1)', 'Kunne ikke åpne brosjyren'], ['/missing.pdf', 'Fant ikke brosjyren'], ['/demo.css', 'Kunne ikke åpne brosjyren']]) {
     await reader(page).evaluate((el, value) => el.setAttribute('src', value), src);
-    await expect(reader(page).getByText('Kunne ikke åpne brosjyren')).toBeVisible();
+    await expect(reader(page).getByText(title)).toBeVisible();
     await expect(reader(page).locator('.next')).toBeDisabled();
     await expect(reader(page).locator('.sheet canvas')).toHaveCount(0);
   }
@@ -224,11 +225,11 @@ test('real catalog: 12 portrait A4 pages read as cover and spreads, on mobile to
 });
 
 test('public cross-origin PDF URL and iframe viewer work', async ({ page }) => {
-  await page.goto('/viewer.html?pdf=' + encodeURIComponent('http://localhost:4174/demo.pdf'));
+  await page.goto('/viewer.html?pdf=' + encodeURIComponent(`http://localhost:${port}/demo.pdf`));
   await ready(page);
   await expect(reader(page).locator('.pages')).toHaveText('1 / 6');
   await page.goto('/');
-  await page.evaluate(() => { document.body.innerHTML = '<iframe title="Brosjyre" src="http://localhost:4174/viewer.html?pdf=./demo.pdf" style="width:900px;height:700px" allow="fullscreen"></iframe><iframe title="Uten fullskjerm" src="http://localhost:4174/viewer.html?pdf=./demo.pdf" style="width:900px;height:700px"></iframe>'; });
+  await page.evaluate(port => { document.body.innerHTML = `<iframe title="Brosjyre" src="http://localhost:${port}/viewer.html?pdf=./demo.pdf" style="width:900px;height:700px" allow="fullscreen"></iframe><iframe title="Uten fullskjerm" src="http://localhost:${port}/viewer.html?pdf=./demo.pdf" style="width:900px;height:700px"></iframe>`; }, port);
   await expect(page.frameLocator('iframe').first().locator('e-brosjyre .sheet canvas')).toBeVisible();
   // Fullscreen is only offered where the browser allows it: a cross-origin iframe (the Webflow case) needs allow="fullscreen".
   await expect(page.frameLocator('iframe').first().locator('e-brosjyre .full')).toBeVisible();
@@ -251,17 +252,19 @@ test('multiple embeds isolate state and survive removal/reconnection', async ({ 
 
 test('embed generator and external component module can be used on another site', async ({ page }) => {
   await page.goto('/'); await ready(page);
-  await page.getByLabel('Adresse til ebrosjyre.js').fill('http://localhost:4174/ebrosjyre.js');
-  await page.getByLabel('Adresse til PDF', { exact: true }).fill('http://localhost:4174/demo.pdf?x=1&y=2');
+  await page.getByLabel('Adresse til ebrosjyre.js').fill(`http://localhost:${port}/ebrosjyre.js`);
+  await page.getByLabel('Adresse til PDF', { exact: true }).fill(`http://localhost:${port}/demo.pdf?x=1&y=2`);
   await page.getByRole('button', { name: 'Lag innbyggingskode' }).click();
   const code = await page.getByLabel('Klar for Code Embed i Webflow').inputValue();
   expect(code).toContain('&amp;y=2');
-  await writeFile('dist/embedding-test.html', `<html><body>${code}</body></html>`);
+  // One file per browser project and repeat: they run in parallel and must not remove each other's page.
+  const file = `embedding-test-${test.info().project.name}-${test.info().repeatEachIndex}.html`;
+  await writeFile(`dist/${file}`, `<html><body>${code}</body></html>`);
   try {
-    await page.goto('/embedding-test.html');
+    await page.goto(`/${file}`);
     await ready(page);
     await expect(reader(page).locator('.pages')).toHaveText('1 / 6');
-  } finally { await unlink('dist/embedding-test.html'); }
+  } finally { await unlink(`dist/${file}`); }
 });
 
 test('fullscreen toggles from an explicit button click', async ({ page }) => {

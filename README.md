@@ -89,9 +89,9 @@ Viseren sender tre hendelser fra `<e-brosjyre>`-elementet. Bruk dem for eksempel
 | --- | --- | --- |
 | `brochure-ready` | Én gang når PDF-en er lastet og de første sidene vises. | `{ page, pages, total }` |
 | `brochure-page` | Hver gang leseren lander på et nytt oppslag, også det første. Sendes når bladet har landet, ikke underveis i en vending, og bare én gang for det samme oppslaget. Zoom og endret vindusstørrelse sender ingenting så lenge de samme sidene vises. | `{ page, pages, total }` |
-| `brochure-error` | Når PDF-en ikke kan åpnes. | `{ message }` |
+| `brochure-error` | Når PDF-en ikke kan åpnes. | `{ reason, message }` |
 
-`page` er første side i oppslaget som vises, `pages` er sidene som faktisk vises (én eller to, for eksempel `[6, 7]`), og `total` er antall sider i PDF-en. `message` er feilmeldingen leseren ser.
+`page` er første side i oppslaget som vises, `pages` er sidene som faktisk vises (én eller to, for eksempel `[6, 7]`), og `total` er antall sider i PDF-en. `message` er feilmeldingen leseren ser, og `reason` er årsaken som kode (se [Når PDF-en ikke kan åpnes](#når-pdf-en-ikke-kan-åpnes)).
 
 ```html
 <script>
@@ -102,7 +102,7 @@ Viseren sender tre hendelser fra `<e-brosjyre>`-elementet. Bruk dem for eksempel
     console.log(`Leser side ${e.detail.pages.join('–')} av ${e.detail.total}`);
     // For eksempel: gtag('event', 'brosjyre_side', { side: sist, av: e.detail.total });
   });
-  brosjyre.addEventListener('brochure-error', e => console.warn(e.detail.message));
+  brosjyre.addEventListener('brochure-error', e => console.warn(e.detail.reason, e.detail.message));
 </script>
 ```
 
@@ -127,18 +127,41 @@ Hvis du foretrekker en iframe, bruk `viewer.html` fra publiseringspakken på din
 
 ## Størrelsen på PDF-en avgjør ventetiden
 
-Hele PDF-en lastes ned før første side vises. Nettleseren får ikke lese `Accept-Ranges` fra en
-annen kilde, så PDF.js kan ikke hente bare de sidene leseren trenger når filen ligger på et
-annet opphav enn nettsiden. Filstørrelsen er derfor den viktigste enkeltfaktoren for hvor
-lenge leseren venter.
+Filstørrelsen er den viktigste enkeltfaktoren for hvor lenge leseren venter.
 
-Målt på en Pixel 7-profil med CPU strupet 4x, median av tre kjøringer, tid til første side:
+Målt på en Pixel 7-profil med CPU strupet 4x, median av tre kjøringer, tid til første side,
+før viseren lærte å hente PDF-en i deler:
 
 | Nettverk | 7 KB | 3,9 MB | 2,3 MB (samme katalog, web-eksport) |
 | --- | --- | --- | --- |
 | Rask 4G (8,1 Mbit/s) | 1,4 s | 5,7 s | 4,1 s |
 | Treg 4G (1,44 Mbit/s) | 5,4 s | 29,1 s | 20,0 s |
 | 3G (0,4 Mbit/s) | 18,9 s | 104 s | — |
+
+### Henting i deler
+
+Når filverten støtter område-forespørsler (`Range`), henter viseren først det PDF.js trenger for
+side 1, mens resten av filen lastes ned i bakgrunnen. Det virker også når PDF-en ligger på et annet
+opphav enn nettsiden. Nettleseren skjuler `Accept-Ranges` for andre opphav, så viseren spør i stedet
+etter `Range: bytes=0-` og ser på svaret: `206` betyr at verten støtter det. Webflows filvert
+(`cdn.prod.website-files.com`) svarer slik. Svarer verten `200`, hentes hele filen som før.
+
+Målt med PDF-en på et annet opphav enn viseren, med de samme svarhodene som Webflows filvert
+(Pixel 7-profil, CPU strupet 4x, median av tre kjøringer, tid til første side i sekunder):
+
+| Nettverk | Fil | Før | Etter |
+| --- | --- | --- | --- |
+| Rask 4G (8,1 Mbit/s) | 7 KB | 2,2 | 2,1 |
+| Rask 4G (8,1 Mbit/s) | 3,9 MB | 6,4 | 5,3 |
+| Treg 4G (1,44 Mbit/s) | 7 KB | 10,6 | 10,5 |
+| Treg 4G (1,44 Mbit/s) | 3,9 MB | 33,9 | 25,7 |
+
+3G ble ikke målt etter endringen. Viserens egne filer ble servert ukomprimert fra en lokal
+server, så tallene er høyere enn i tabellen over; det er forskjellen mellom før og etter som teller.
+
+For en liten PDF endrer det nesten ingenting, fordi det da er viserens egne filer som tar tid.
+For den store PDF-en på treg 4G gikk ventetiden ned med en firedel, men 25,7 sekunder er fortsatt
+altfor lenge. Henting i deler gjør ikke en for stor PDF liten nok.
 
 **Eksporter for skjerm, ikke for trykk.** En trykkeri-PDF bærer med seg ting som ikke gjør
 nytte på nett: CMYK-bilder, innebygde ICC-profiler (en fargeprofil alene kan være rundt
@@ -164,7 +187,33 @@ En respons som viser CORS-tilgang kan kontrolleres med:
 curl -I -H 'Origin: https://DIN-NETTSIDE.no' 'https://DIN-PDFVERT.no/brosjyre.pdf'
 ```
 
-Hvis viseren viser en feil, kontroller offentlig tilgang, CORS, at lenken returnerer PDF-data og at PDF-en ikke har passord. **Åpne original PDF** gir direkte tilgang til filen når URL-en er gyldig.
+## Når PDF-en ikke kan åpnes
+
+Mens PDF-en lastes, viser viseren hvor mye som er hentet, for eksempel «1,2 MB av 3,9 MB». Sender
+filverten ikke filstørrelsen (`Content-Length`), vises bare mengden som er hentet, uten fremdriftslinje.
+
+Går noe galt, sier viseren hva det er, og tilbyr **Prøv igjen** og **Åpne PDF-en** der det kan hjelpe.
+Knappene vises over brosjyren og virker også med `chrome="none"`. Prøv igjen laster PDF-en på nytt uten
+at nettsiden lastes om.
+
+| `reason` | Leseren ser | Årsak |
+| --- | --- | --- |
+| `stalled` | Lastingen står stille | Ingenting nytt har kommet fram på 15 sekunder. Lastingen fortsetter, og meldingen forsvinner av seg selv hvis data begynner å komme igjen. Sendes ikke som `brochure-error`. |
+| `slow` | Dette tar lang tid | PDF-en er hentet, men viseren har ikke kommet i gang etter ett minutt (PDF.js-arbeideren er ikke lastet). Sendes ikke som `brochure-error`. |
+| `network` | Ingen forbindelse | Filverten kunne ikke nås: nettverksbrudd, feil vertsnavn eller en vert som er nede. |
+| `offline` | Du er uten nett | Nettleseren melder at enheten er frakoblet. |
+| `broken` | Forbindelsen ble brutt | Filverten svarte, men forbindelsen falt ut underveis. |
+| `cors` | Kunne ikke vise brosjyren her | Filverten svarer, men tillater ikke at nettsiden leser filen. Se [Hosting og CORS](#hosting-og-cors). |
+| `missing` | Fant ikke brosjyren | Filverten svarte 404. |
+| `status` | Kunne ikke åpne brosjyren | Filverten svarte med en annen feilkode, for eksempel 403 eller 500. |
+| `not-pdf` | Kunne ikke åpne brosjyren | Lenken gir noe annet enn en PDF, for eksempel en nettside. |
+| `password` | Brosjyren er passordbeskyttet | PDF-en krever passord. |
+| `invalid-url` | Kunne ikke åpne brosjyren | `src` er ikke en http- eller https-lenke. |
+| `setup` | Kunne ikke starte viseren | Viserens egne filer lot seg ikke laste, ofte på grunn av nettstedets innholdspolicy (CSP). |
+
+Nettleseren skiller ikke en CORS-avvisning fra et nettverksbrudd. Viseren spør derfor filverten
+én gang til for å finne ut hvilken det er. Den forespørselen er en `HEAD` uten data og sendes bare
+etter en feil.
 
 ## Leserfunksjoner
 

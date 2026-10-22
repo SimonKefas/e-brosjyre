@@ -1,6 +1,7 @@
-import { getDocument, GlobalWorkerOptions, setLayerDimensions, TextLayer } from 'pdfjs-dist';
+import { getDocument, GlobalWorkerOptions, PDFWorker, setLayerDimensions, TextLayer } from 'pdfjs-dist';
 import styles from './viewer.css';
 import { Curl, curve } from './curl.js';
+import { Source } from './source.js';
 
 const assets = new URL('./pdfjs/', import.meta.url);
 GlobalWorkerOptions.workerSrc = new URL('pdf.worker.min.mjs', assets).href;
@@ -61,6 +62,36 @@ const A4 = { width: 595, height: 842 };
 const SCHEMES = ['http:', 'https:', 'mailto:'];
 // A link to a page of the brochure, in the host page's URL fragment: #side=7. Any other fragment belongs to the host page.
 const PAGE_LINK = /^#side=(.*)$/;
+// A download that has brought nothing new for this long is reported as standing still. Measured on 3G (0.4 Mbit/s, CPU slowed
+// 4x), a 4 MB PDF never went more than about 2 s between progress updates, so a gap this long is a stalled or dead connection,
+// while a mobile network's usual hiccups (a cell handover, a tunnel) of a few seconds pass without alarm.
+const STALL = 15_000;
+// The PDF downloads alongside PDF.js' worker (1.3 MB, 0.4 MB compressed), which has no progress to watch. On the same 3G it took
+// 15 s uncompressed; once the PDF is in, this leaves room for a slower link before the reader is told it is taking long.
+const SETUP = 60_000;
+// How long the check that tells a CORS refusal from an unreachable host may take.
+const PROBE = 5_000;
+// What went wrong, as the reader is told: title, advice, and whether trying again or opening the file directly can help.
+const FAILURES = {
+  'invalid-url': { title: 'Kunne ikke åpne brosjyren', detail: 'Bruk en gyldig http- eller https-lenke direkte til PDF-filen.' },
+  password: { title: 'Brosjyren er passordbeskyttet', detail: 'PDF-en krever passord og kan ikke vises her. Bruk en PDF uten passord, eller åpne originalen.', open: true },
+  'not-pdf': { title: 'Kunne ikke åpne brosjyren', detail: 'Lenken gir ikke en lesbar PDF-fil. Kontroller at den går direkte til PDF-filen.', open: true },
+  missing: { title: 'Fant ikke brosjyren', detail: 'Filverten har ingen fil på denne lenken (404). Kontroller lenken.' },
+  status: { title: 'Kunne ikke åpne brosjyren', detail: 'Filverten svarte med feilkode {status}. Prøv igjen om litt, eller kontroller lenken.', retry: true, open: true },
+  cors: { title: 'Kunne ikke vise brosjyren her', detail: 'Filverten svarer, men tillater ikke at PDF-en vises på denne nettsiden. Verten må tillate CORS for nettsidens adresse. Originalen kan fortsatt åpnes direkte.', open: true },
+  broken: { title: 'Forbindelsen ble brutt', detail: 'Nedlastingen ble avbrutt underveis. Sjekk nettforbindelsen og prøv igjen.', retry: true, open: true },
+  network: { title: 'Ingen forbindelse', detail: 'Fikk ikke kontakt med filverten. Sjekk nettforbindelsen og prøv igjen.', retry: true, open: true },
+  offline: { title: 'Du er uten nett', detail: 'Koble til internett og prøv igjen.', retry: true },
+  setup: { title: 'Kunne ikke starte viseren', detail: 'PDF-leseren i viseren lot seg ikke laste. Kontroller at viserens filer er tilgjengelige, og at nettstedets innholdspolicy (CSP) tillater dem.', retry: true, open: true },
+  slow: { title: 'Dette tar lang tid', detail: 'PDF-en er lastet ned, men viseren har ikke kommet i gang etter ett minutt. Forbindelsen kan være treg eller brutt.', retry: true, open: true },
+  stalled: { title: 'Lastingen står stille', detail: `Ingenting nytt har kommet fram på ${STALL / 1000} sekunder. Forbindelsen kan være treg eller brutt.`, retry: true, open: true },
+};
+// Bytes as the reader reads them: kB under a megabyte, MB with one decimal above, in Norwegian notation.
+const decimal = new Intl.NumberFormat('nb-NO', { maximumFractionDigits: 1 });
+const bytes = n => n < 1e6 ? `${Math.max(1, Math.round(n / 1e3))} kB` : `${decimal.format(Math.round(n / 1e5) / 10)} MB`;
+// Whether a HEAD request gets an answer. In 'cors' mode only one the page may read counts; a 'no-cors' request is never
+// blocked by CORS, so it succeeds whenever the host answers at all.
+const reachable = (href, mode) => fetch(href, { mode, method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(PROBE) }).then(() => true, () => false);
 
 class EBrosjyre extends HTMLElement {
   static observedAttributes = ['src', 'title', 'spread', 'chrome'];
@@ -72,7 +103,11 @@ class EBrosjyre extends HTMLElement {
         <div class="stage">
           <div class="scroller"><div class="spread"><div class="book"><div class="slot left"></div><div class="slot right"></div></div></div></div>
           <canvas class="curl" aria-hidden="true"></canvas>
-          <div class="message" role="status" aria-live="polite"><span class="spinner" hidden></span><strong></strong><p></p></div>
+          <div class="message">
+            <span class="spinner" hidden></span><div class="status" role="status" aria-live="polite"><strong></strong><p></p></div>
+            <div class="loaded" hidden><progress max="1" aria-label="Lastet ned"></progress><span class="amount" aria-hidden="true"></span></div>
+            <div class="choices"><button type="button" class="retry" hidden>Prøv igjen</button><a class="original" target="_blank" rel="noopener noreferrer">Åpne PDF-en</a></div>
+          </div>
           ${button('prev', 'Forrige side')}${button('next', 'Neste side')}
           <nav class="panel" id="contents" aria-label="Innholdsoversikt" hidden><header><strong>Innhold</strong>${button('close', 'Lukk innholdsoversikten')}</header><div class="entries"></div></nav>
         </div>
@@ -119,6 +154,8 @@ class EBrosjyre extends HTMLElement {
     on(this.$('.fit'), 'click', () => this.setZoom(1));
     on(this.$('.progress'), 'input', e => this.goTo(Number(e.target.value), true));
     on(this.$('.full'), 'click', () => this.toggleFullscreen());
+    // The button goes away as the new attempt starts, so focus stays in the viewer rather than falling back to the page.
+    on(this.$('.retry'), 'click', () => { this.$('.reader').focus(); this.load(); });
     on(this.$('.toc'), 'click', () => this.toggleContents());
     on(this.$('.panel .close'), 'click', () => this.toggleContents(false));
     on(this.$('.panel'), 'click', e => {
@@ -223,7 +260,12 @@ class EBrosjyre extends HTMLElement {
     this.thumbs?.observer.disconnect();
     this.thumbs = null;
     this.reset();
-    this.loadingTask?.destroy().catch(() => {});
+    clearTimeout(this.stallTimer);
+    // The worker goes once the document on it is torn down; ending it first leaves that teardown waiting for ever.
+    const worker = this.worker;
+    this.worker = null;
+    this.source?.abort();
+    Promise.resolve(this.loadingTask?.destroy()).catch(() => {}).finally(() => worker?.destroy());
     this.pdf = null;
   }
   attributeChangedCallback(name, oldValue, newValue) {
@@ -348,17 +390,71 @@ class EBrosjyre extends HTMLElement {
     this.$('.slot.left').replaceChildren();
     this.$('.slot.right').replaceChildren();
   }
-  message(title, detail = '', loading = false) {
+  // The notice over the stage. `progress` keeps the download's progress on show, `retry` and `open` offer the way out.
+  message(title, detail = '', { loading = false, progress = false, retry = false, open = false } = {}) {
     this.$('.reader').setAttribute('aria-busy', String(loading));
     this.$('.message').hidden = false;
     this.$('.message strong').textContent = title;
     this.$('.message p').textContent = detail;
     this.$('.spinner').hidden = !loading;
+    this.$('.loaded').hidden = !progress || !this.loaded;
+    this.$('.retry').hidden = !retry;
+    const href = open && this.$('.open').getAttribute('href');
+    if (href) this.$('.original').href = href;
+    else this.$('.original').removeAttribute('href');
+  }
+  // The download moved (bytes in, a request started or settled): show how far it has come and watch it again. Once nothing is
+  // left to fetch, only a worker still on its way is watched. With no length from the server, or a compressed one that the
+  // decoded bytes outgrow, there is nothing to measure against, so only the amount shows, never a bar.
+  progress(source) {
+    if (source !== this.source || this.ready || source.error) return;
+    const { loaded, length: total } = source;
+    if (source.busy) this.watch();
+    else this.watch(!!this.loadingTask, [SETUP, 'slow']);
+    if (!loaded) return;
+    this.loaded = loaded;
+    const known = total > 0 && loaded <= total;
+    this.$('.loaded progress').hidden = !known;
+    if (known) this.$('.loaded progress').value = loaded / total;
+    this.$('.amount').textContent = known ? `${bytes(loaded)} av ${bytes(total)}` : `${bytes(loaded)} lastet ned`;
+    if (this.stalled) this.loading();
+    this.$('.loaded').hidden = false;
+  }
+  loading() {
+    this.stalled = false;
+    this.message('Laster brosjyren …', '', { loading: true, progress: true });
+  }
+  // A download that brings nothing new for STALL ms (a setup that has not finished in SETUP ms) is reported, with a way to try
+  // again; it carries on in the background, and the notice goes away by itself if bytes start arriving again.
+  watch(done = false, [delay, reason] = [STALL, 'stalled']) {
+    clearTimeout(this.stallTimer);
+    if (done) return;
+    const generation = this.generation;
+    this.stallTimer = setTimeout(() => {
+      if (generation !== this.generation || this.ready) return;
+      this.stalled = true;
+      const { title, detail, ...actions } = FAILURES[reason];
+      this.message(title, detail, { ...actions, progress: true });
+    }, delay);
+  }
+  // Name what went wrong (see FAILURES). A request that fails before the host has answered fails the same way whether the host
+  // was out of reach or CORS refused us; a no-cors request, which CORS never blocks, tells the two apart.
+  async failure(error, url) {
+    if (error.message === 'invalid-url') return 'invalid-url';
+    if (error.name === 'PasswordException') return 'password';
+    if (error.name === 'InvalidPDFException') return 'not-pdf';
+    if (error.status && error.status !== 200 && error.status !== 206) return error.status === 404 ? 'missing' : 'status';
+    if (error.answered) return 'broken';
+    if (!navigator.onLine) return 'offline';
+    if (error.message === 'worker') return await reachable(GlobalWorkerOptions.workerSrc, 'no-cors') ? 'setup' : 'network';
+    return url.origin !== location.origin && await reachable(url.href, 'no-cors') ? 'cors' : 'network';
   }
   async load() {
     const generation = ++this.generation;
     const previousTask = this.loadingTask;
     this.loadingTask = null;
+    this.source?.abort();
+    this.source = null;
     this.pdf = null;
     this.sizes = null;
     this.typical = null;
@@ -374,19 +470,34 @@ class EBrosjyre extends HTMLElement {
     this.$('.open').removeAttribute('href');
     this.$('.reader').setAttribute('aria-label', this.getAttribute('title') || 'PDF-brosjyre');
     this.updateControls();
-    this.message('Laster brosjyren …', '', true);
+    this.loaded = 0;
+    clearTimeout(this.stallTimer);
+    this.loading();
+    let url;
     try {
       await previousTask?.destroy();
       if (generation !== this.generation) return;
-      const source = this.getAttribute('src');
-      if (!source) { this.message('Din neste leseopplevelse', 'Legg til en PDF-lenke for å åpne brosjyren.'); return; }
-      const fresh = this.fresh;
-      this.fresh = false;
-      const url = new URL(source, document.baseURI);
+      const src = this.getAttribute('src');
+      if (!src) { this.message('Din neste leseopplevelse', 'Legg til en PDF-lenke for å åpne brosjyren.'); return; }
+      url = new URL(src, document.baseURI);
       if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('invalid-url');
       this.$('.open').href = url.href;
+      // The PDF downloads while PDF.js' worker starts. The worker is kept across attempts, and a new one is made if it failed.
+      const source = this.source = new Source(url.href, () => this.progress(source));
+      this.worker ??= new PDFWorker();
+      const worker = this.worker;
+      this.watch();
+      await Promise.all([source.open(), worker.promise.catch(() => {
+        if (this.worker === worker) { worker.destroy(); this.worker = null; }
+        throw new Error('worker');
+      })]);
+      if (generation !== this.generation) return;
+      // Whatever waits on the document below also gives way when the download fails.
+      const until = promise => Promise.race([promise, source.failed]);
       this.loadingTask = getDocument({
-        url: url.href,
+        worker,
+        range: source,
+        disableRange: !source.ranges,
         cMapUrl: new URL('cmaps/', assets).href,
         cMapPacked: true,
         standardFontDataUrl: new URL('standard_fonts/', assets).href,
@@ -394,12 +505,14 @@ class EBrosjyre extends HTMLElement {
         iccUrl: new URL('iccs/', assets).href,
         isEvalSupported: false,
       });
-      const pdf = await this.loadingTask.promise;
+      // Only a download that has finished stops the watch here: the timer for one under way runs from its last bytes.
+      if (!source.busy) this.watch(true);
+      const pdf = await until(this.loadingTask.promise);
       // Real, rotation-corrected page sizes (getViewport honours /Rotate) drive layout and scale, so fetch them all up front.
-      const sizes = await Promise.all(Array.from({ length: pdf.numPages }, (_, i) => pdf.getPage(i + 1).then(page => {
+      const sizes = await until(Promise.all(Array.from({ length: pdf.numPages }, (_, i) => pdf.getPage(i + 1).then(page => {
         const { width, height } = page.getViewport({ scale: 1 });
         return { width, height };
-      })));
+      }))));
       if (generation !== this.generation) return;
       const counts = new Map();
       for (const { width, height } of sizes) {
@@ -410,16 +523,24 @@ class EBrosjyre extends HTMLElement {
       this.typical = { width: Number(common.split('x')[0]), height: Number(common.split('x')[1]) };
       this.sizes = sizes;
       this.pdf = pdf;
+      // The first document shown after connecting opens at the page the URL asks for, also when it took more than one attempt.
+      const fresh = this.fresh;
+      this.fresh = false;
       if (fresh && this.linked) this.page = this.normalizePage(this.linkedPage() ?? 1);
       this.fit();
-      await this.render();
+      await until(this.render());
+      if (generation === this.generation) clearTimeout(this.stallTimer);
     } catch (error) {
       if (generation !== this.generation) return;
+      clearTimeout(this.stallTimer);
       this.pdf = null;
       this.updateControls();
-      const detail = error.message === 'invalid-url' ? 'Bruk en gyldig http- eller https-lenke direkte til PDF-filen.' : error.name === 'PasswordException' ? 'PDF-en er passordbeskyttet. Bruk en PDF uten passord.' : 'Kontroller at lenken går direkte til en offentlig PDF, og at filverten tillater CORS. Du kan også prøve å åpne originalen.';
-      this.message('Kunne ikke åpne brosjyren', detail);
-      this.dispatchEvent(new CustomEvent('brochure-error', { detail: { message: detail } }));
+      const reason = await this.failure(error, url);
+      if (generation !== this.generation) return;
+      const { title, detail, ...actions } = FAILURES[reason];
+      const message = detail.replace('{status}', error.status);
+      this.message(title, message, actions);
+      this.dispatchEvent(new CustomEvent('brochure-error', { detail: { reason, message } }));
     }
   }
   // The chain of spreads currently on the table: the resting spread, or every spread a leaf in flight connects.
@@ -536,7 +657,10 @@ class EBrosjyre extends HTMLElement {
     this.updateControls();
     this.$('.reader').setAttribute('aria-busy', 'true');
     try {
-      await Promise.all(current.map(number => this.paint(number)));
+      // A page whose bytes can no longer arrive (the download failed after the book opened) would otherwise wait for ever.
+      // Before that, a failed download is the load's to report.
+      const painted = Promise.all(current.map(number => this.paint(number)));
+      await (this.ready ? Promise.race([painted, this.source.failed]) : painted);
       if (id !== this.renderId) return;
       this.layout();
       this.$('.scroller').scrollTo(0, 0);
@@ -549,7 +673,7 @@ class EBrosjyre extends HTMLElement {
     } catch (error) {
       if (id !== this.renderId || error.name === 'RenderingCancelledException' || error.message === 'stale') return;
       this.$('.reader').setAttribute('aria-busy', 'false');
-      this.message('Siden kunne ikke vises', 'Prøv å bla videre, eller åpne original PDF.');
+      this.message('Siden kunne ikke vises', 'Prøv å bla videre, prøv igjen, eller åpne original PDF.', { open: true, retry: true });
     }
   }
   // Where the reader is: the spread's first page, the pages on show and the document's length.
